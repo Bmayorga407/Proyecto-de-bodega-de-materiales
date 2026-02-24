@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/layout/layout.tsx","./src/components/layout/protectedroute.tsx","./src/config/firebase.ts","./src/context/authcontext.tsx","./src/pages/catalog.tsx","./src/pages/inventoryadmin.tsx","./src/pages/login.tsx","./src/types/index.ts"],"version":"5.9.3"}

@@ -1,0 +1,25 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Nested erroneous git repositories
+BodegaCocaCola/
+ProyectoBodega/
+
+# Vercel and Env
+.vercel/
+.env
+.env.*
+credentials.json
