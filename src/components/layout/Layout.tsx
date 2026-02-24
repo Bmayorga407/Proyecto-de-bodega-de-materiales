@@ -22,7 +22,7 @@ export const Layout = () => {
                     <div className="flex justify-between items-center h-16">
                         <div className="flex items-center gap-2">
                             <Package size={24} />
-                            <span className="font-bold text-xl tracking-wide">Bodega <span className="text-black ml-1">Coca-Cola</span></span>
+                            <span className="font-bold text-xl tracking-wide">Bodega <span className="text-black ml-1">Coca-Cola Concepción</span></span>
                         </div>
                         <div className="flex items-center gap-4">
                             {currentUser && (

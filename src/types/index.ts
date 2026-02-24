@@ -7,6 +7,7 @@ export interface Product {
     stock: number;
     imageUrl: string;
     details: string;
+    entryDate?: string;
 }
 
 export interface UserContextType {

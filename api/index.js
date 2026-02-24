@@ -65,11 +65,11 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/products', async (req, res) => {
     try {
-        const { name, code, description, stock, details, imageUrl = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl = '', entryDate = '' } = req.body;
 
         const resource = {
             values: [
-                [Date.now().toString(), code, name, description, stock, imageUrl, details]
+                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate]
             ],
         };
 
@@ -95,7 +95,7 @@ app.get('/api/products', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:G',
+            range: 'Hoja 1!A:H',
         });
 
         const rows = response.data.values;
@@ -115,7 +115,8 @@ app.get('/api/products', async (req, res) => {
                 description: row[3] || '',
                 stock: Number(row[4]) || 0,
                 imageUrl: row[5] || '',
-                details: row[6] || ''
+                details: row[6] || '',
+                entryDate: row[7] || ''
             };
         }).filter(p => p.id && p.id.trim() !== '');
 
@@ -171,6 +172,53 @@ app.delete('/api/products/:id', async (req, res) => {
     } catch (error) {
         console.error('Error deleting product:', error);
         res.status(500).json({ error: 'Failed to delete product' });
+    }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+    try {
+        const productId = req.params.id;
+        const { name, code, description, stock, details, imageUrl, entryDate = '' } = req.body;
+
+        // Fetch all rows to find the exact rowIndex for the given ID
+        const getRes = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Hoja 1!A:H',
+        });
+
+        const rows = getRes.data.values;
+        if (!rows) return res.status(404).json({ error: 'No data' });
+
+        let rowIndex = -1;
+        // Search starting from row 0
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === productId) {
+                rowIndex = i + 1; // Sheets rows are 1-indexed for range queries
+                break;
+            }
+        }
+
+        if (rowIndex === -1) return res.status(404).json({ error: 'Product not found' });
+
+        // Build the update row (maintaining the original productId timestamp)
+        const updateRange = `Hoja 1!A${rowIndex}:H${rowIndex}`;
+        const resource = {
+            values: [
+                [productId, code, name, description, stock, imageUrl, details, entryDate]
+            ],
+        };
+
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: updateRange,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: resource,
+        });
+
+        res.status(200).json({ success: true, message: 'Updated successfully' });
+    } catch (error) {
+        console.error('Error updating product:', error);
+        res.status(500).json({ error: 'Failed to update product' });
     }
 });
 

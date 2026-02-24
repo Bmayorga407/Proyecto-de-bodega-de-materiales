@@ -5,6 +5,7 @@ import Login from './pages/Login';
 
 import Catalog from './pages/Catalog';
 import InventoryAdmin from './pages/InventoryAdmin';
+import ProductDetails from './pages/ProductDetails';
 import { AuthProvider } from './context/AuthContext';
 
 function App() {
@@ -16,6 +17,9 @@ function App() {
 
                     <Route element={<ProtectedRoute />}>
                         <Route element={<Layout />}>
+                            {/* Ruta compartida para ver detalle de producto */}
+                            <Route path="/product/:code" element={<ProductDetails />} />
+
                             {/* Rutas de VENTAS */}
                             <Route element={<ProtectedRoute allowedRole="VENTAS" />}>
                                 <Route path="/catalogo" element={<Catalog />} />

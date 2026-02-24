@@ -1,9 +1,11 @@
 import { useState, useMemo, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Search, Package, Loader2 } from 'lucide-react';
 import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 
 export default function Catalog() {
+    const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const [products, setProducts] = useState<Product[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -12,7 +14,29 @@ export default function Catalog() {
         const loadData = async () => {
             try {
                 const data = await inventoryService.fetchProducts();
-                setProducts(data);
+
+                // Agrupar productos con el mismo código y sumar su stock
+                const aggregatedMap = new Map<string, Product>();
+
+                data.forEach((p) => {
+                    const codeKey = p.code.trim().toLowerCase();
+                    if (!codeKey) return; // Saltamos productos sin código válido
+
+                    if (aggregatedMap.has(codeKey)) {
+                        const existing = aggregatedMap.get(codeKey)!;
+                        existing.stock += p.stock;
+
+                        // Si el antiguo no tenía foto y este sí, actualizamos
+                        if (!existing.imageUrl && p.imageUrl) {
+                            existing.imageUrl = p.imageUrl;
+                        }
+                    } else {
+                        aggregatedMap.set(codeKey, { ...p });
+                    }
+                });
+
+                // Convertir el Map de vuelta a un array para el estado
+                setProducts(Array.from(aggregatedMap.values()));
             } catch (err) {
                 console.error(err);
                 // Optionally set an error state here
@@ -63,7 +87,7 @@ export default function Catalog() {
                     </div>
                 ) : filteredProducts.length > 0 ? (
                     filteredProducts.map((product) => (
-                        <div key={product.id || product.code} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-xl transition-shadow border border-gray-100 group">
+                        <div key={product.id || product.code} onClick={() => navigate(`/product/${product.code}`)} className="bg-white rounded-2xl shadow-md overflow-hidden hover:shadow-xl transition-shadow border border-gray-100 group cursor-pointer hover:border-coca-red/30">
                             <div className="h-48 bg-gray-50 relative border-b border-gray-100 flex justify-center items-center">
                                 {product.imageUrl ? (
                                     <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />

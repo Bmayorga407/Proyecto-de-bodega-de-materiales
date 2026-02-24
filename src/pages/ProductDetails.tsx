@@ -1,0 +1,274 @@
+import { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X } from 'lucide-react';
+import { Product } from '../types';
+import { inventoryService } from '../services/inventoryService';
+import { useAuth } from '../context/AuthContext';
+
+export default function ProductDetails() {
+    const { code } = useParams();
+    const navigate = useNavigate();
+    const { role } = useAuth();
+
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSaving, setIsSaving] = useState(false);
+    const [products, setProducts] = useState<Product[]>([]);
+
+    const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [formData, setFormData] = useState<Partial<Product>>({
+        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0]
+    });
+    const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+
+    const loadProducts = async () => {
+        try {
+            setIsLoading(true);
+            const data = await inventoryService.fetchProducts();
+            // Filtrar solo los movimientos que coincidan con el código de la URL
+            const filtered = data.filter(p => p.code.toLowerCase() === code?.toLowerCase());
+            setProducts(filtered);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        loadProducts();
+    }, [code]);
+
+    const handleEditClick = (product: Product) => {
+        setEditingProduct(product);
+        setFormData({ ...product });
+    };
+
+    const handleSave = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!editingProduct?.id) return;
+
+        setIsSaving(true);
+        try {
+            await inventoryService.updateProduct(editingProduct.id, formData);
+            setEditingProduct(null);
+            setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: '' });
+            loadProducts();
+        } catch (err) {
+            console.error(err);
+            alert("Hubo un error al actualizar el registro.");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const handleDelete = async (id: string) => {
+        if (window.confirm('¿Seguro que deseas eliminar este registro específico de bodega?')) {
+            try {
+                setIsLoading(true);
+                await inventoryService.deleteProduct(id);
+                await loadProducts();
+            } catch (e) {
+                console.error(e);
+                alert("Error al eliminar.");
+                setIsLoading(false);
+            }
+        }
+    };
+
+    if (isLoading) {
+        return (
+            <div className="flex flex-col items-center justify-center py-20">
+                <Loader2 className="animate-spin text-coca-red w-12 h-12 mb-4" />
+                <h3 className="text-lg font-medium text-gray-900">Cargando detalles...</h3>
+            </div>
+        );
+    }
+
+    if (products.length === 0) {
+        return (
+            <div className="max-w-4xl mx-auto space-y-6 text-center py-20">
+                <p className="text-gray-500 mb-4">No se encontraron registros para el código: {code}</p>
+                <button onClick={() => navigate(-1)} className="text-coca-red hover:underline inline-flex items-center gap-2">
+                    <ArrowLeft size={16} /> Volver
+                </button>
+            </div>
+        );
+    }
+
+    // Usar el primer producto para los datos de cabecera (suponiendo que nombre e imagen base son iguales)
+    const baseProduct = products[0];
+    const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
+
+    return (
+        <div className="space-y-6 max-w-5xl mx-auto pb-12">
+            {/* Cabecera / Foto Fotorealista que se desvanece */}
+            <div className="relative w-auto h-56 md:h-80 -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 border-b border-gray-100/50 mb-8 cursor-pointer group overflow-hidden bg-white" onClick={() => setIsImageModalOpen(true)}>
+
+                {/* Botón Volver flotante */}
+                <button onClick={(e) => { e.stopPropagation(); navigate(-1); }} className="absolute top-6 left-6 z-20 p-2.5 bg-white/80 hover:bg-white backdrop-blur-md rounded-full shadow-md hover:shadow-lg transition-all border border-gray-100/50 hover:scale-105">
+                    <ArrowLeft size={20} className="text-gray-800" />
+                </button>
+
+                {baseProduct.imageUrl ? (
+                    <>
+                        {/* Fondo borroso para rellenar espacios y mimetizar color */}
+                        <img src={baseProduct.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover blur-3xl opacity-40 scale-125 saturate-200" />
+
+                        {/* Imagen Hero proporcional */}
+                        <div className="relative z-10 w-full h-full flex items-center justify-center p-8 pb-16">
+                            <img src={baseProduct.imageUrl} alt={baseProduct.name} className="max-w-full max-h-full object-contain filter drop-shadow-2xl group-hover:scale-105 transition-transform duration-700" />
+                        </div>
+                    </>
+                ) : (
+                    <div className="w-full h-full bg-gray-50 flex items-center justify-center relative z-10">
+                        <Camera size={48} className="text-gray-300" />
+                    </div>
+                )}
+                {/* Gradiente de desvanecimiento hacia el fondo grys-50 */}
+                <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-gray-50 via-gray-50/80 to-transparent pointer-events-none z-10"></div>
+                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors pointer-events-none flex items-center justify-center z-20">
+                    <div className="opacity-0 group-hover:opacity-100 bg-black/60 text-white px-5 py-2.5 rounded-full text-sm font-medium backdrop-blur-md transition-all transform translate-y-4 group-hover:translate-y-0 shadow-xl">
+                        Ver pantalla completa
+                    </div>
+                </div>
+            </div>
+
+            {/* Modal de Imagen Pantalla Completa */}
+            {isImageModalOpen && (
+                <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setIsImageModalOpen(false)}>
+                    <button className="absolute top-6 right-6 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors" onClick={() => setIsImageModalOpen(false)}>
+                        <X size={32} />
+                    </button>
+                    {baseProduct.imageUrl && (
+                        <img src={baseProduct.imageUrl} alt={baseProduct.name} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
+                    )}
+                </div>
+            )}
+
+            {/* Datos del Producto */}
+            <div className="relative z-10 bg-white rounded-3xl shadow-sm p-6 sm:p-8 border border-gray-100 -mt-20">
+                <div className="flex flex-col md:flex-row gap-8 items-start justify-between">
+                    <div className="flex-1">
+                        <div className="flex items-center gap-3 mb-2">
+                            <h1 className="text-3xl font-black text-gray-900 tracking-tight">{baseProduct.name}</h1>
+                            <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-mono border border-gray-200">{baseProduct.code}</span>
+                        </div>
+                        <p className="text-gray-600 text-lg leading-relaxed">{baseProduct.description}</p>
+                    </div>
+
+                    <div className="flex flex-col gap-3 min-w-[200px] w-full md:w-auto">
+                        <div className="bg-red-50 border border-red-100/50 p-6 rounded-2xl text-center shadow-inner">
+                            <p className="text-sm text-red-600 font-bold uppercase tracking-widest mb-1">Stock Disponible</p>
+                            <p className="text-5xl font-black text-coca-red drop-shadow-sm">{totalStock}</p>
+                        </div>
+                        {role === 'VENTAS' && (
+                            <button className="flex items-center justify-center gap-2 bg-coca-black text-white px-6 py-4 rounded-xl hover:bg-gray-800 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold w-full active:scale-95 text-lg">
+                                <Send size={20} />
+                                Solicitar Material
+                            </button>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Modal de Edición En Línea */}
+            {editingProduct && (
+                <div className="bg-white rounded-2xl shadow-md p-6 border border-gray-100 border-l-4 border-l-coca-red">
+                    <div className="flex justify-between items-center mb-4">
+                        <h2 className="text-lg font-bold text-gray-900">Modificando Registro Específico</h2>
+                        <button onClick={() => setEditingProduct(null)} className="text-gray-400 hover:text-gray-600 text-sm">Cerrar</button>
+                    </div>
+
+                    <form onSubmit={handleSave} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Stock Registrado</label>
+                                <input required type="number" min="0" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
+                                    value={formData.stock || ''} onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha de Ingreso</label>
+                                <input required type="date" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
+                                    value={formData.entryDate || ''} onChange={e => setFormData({ ...formData, entryDate: e.target.value })} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Detalles de Ubicación</label>
+                                <input type="text" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
+                                    value={formData.details || ''} onChange={e => setFormData({ ...formData, details: e.target.value })} />
+                            </div>
+                        </div>
+
+                        <div className="flex border-t pt-4 justify-end gap-2">
+                            <button disabled={isSaving} type="button" onClick={() => setEditingProduct(null)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg font-medium">
+                                Cancelar
+                            </button>
+                            <button disabled={isSaving} type="submit" className={`px-4 py-2 text-sm text-white rounded-lg font-medium flex items-center gap-2 
+                                ${isSaving ? 'bg-gray-400' : 'bg-coca-black hover:bg-gray-800'}`}>
+                                {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Actualizar Fila
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            )}
+
+            {/* Tabla de Movimientos de Bodega */}
+            {role === 'BODEGA' && (
+                <div className="bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
+                    <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                        <h2 className="font-semibold text-gray-800">Historial de Ingresos / Asignaciones</h2>
+                    </div>
+                    <div className="overflow-x-auto">
+                        <table className="min-w-full divide-y divide-gray-200">
+                            <thead className="bg-white">
+                                <tr>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Monto (Stock)</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación / Detalle</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario (Registrador)</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Auditoría</th>
+                                </tr>
+                            </thead>
+                            <tbody className="bg-white divide-y divide-gray-100">
+                                {products.map(p => (
+                                    <tr key={p.id} className={editingProduct?.id === p.id ? 'bg-red-50/50' : 'hover:bg-gray-50 transition-colors'}>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-l-2 border-transparent">
+                                            {p.entryDate ? new Date(p.entryDate).toLocaleDateString() : '-'}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <div className={`font-bold flex items-center gap-1 px-2 py-1 rounded w-fit ${p.stock > 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+                                                {p.stock > 0 ? `+${p.stock}` : p.stock}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            {p.details || <span className="text-gray-300 italic">Sin ubicación</span>}
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                            <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
+                                                <User size={14} className="text-gray-400" />
+                                                <span className="text-xs text-gray-600 font-medium">BODEGA S. (Proximamente)</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-1">
+                                            <button onClick={() => handleEditClick(p)} className="text-blue-500 hover:text-blue-700 transition-colors p-1.5 rounded-full hover:bg-blue-50">
+                                                <Edit2 size={16} />
+                                            </button>
+                                            <button onClick={() => handleDelete(p.id)} className="text-red-400 hover:text-red-700 transition-colors p-1.5 rounded-full hover:bg-red-50">
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
+
+            <div className="md:hidden mt-8 text-center pt-8 border-t">
+                <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-coca-black inline-flex items-center gap-2 font-medium">
+                    <ArrowLeft size={18} /> Volver
+                </button>
+            </div>
+        </div>
+    );
+}
