@@ -13,6 +13,7 @@ type Role = 'BODEGA' | 'VENTAS' | 'SUPERVISOR' | null;
 interface AuthContextType {
     currentUser: User | null;
     role: Role;
+    isTestUser: boolean;
     loading: boolean;
     login: (email: string, pass: string) => Promise<any>;
     logout: () => Promise<void>;
@@ -36,6 +37,12 @@ const VENTAS_EMAILS = [
 // Correos exclusivos para SUPERVISOR (próximamente)
 const SUPERVISOR_EMAILS = [
     'supervisor@coca-cola.local'
+];
+
+// Correos destinados al Testing Environment
+const TEST_EMAILS = [
+    'brian.mayorga@coca-cola.local',
+    'ventas1@coca-cola.local'
 ];
 
 const determineRole = (email: string | null): Role => {
@@ -76,9 +83,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const logout = () => signOut(auth);
 
+    const isTestUser = currentUser?.email ? TEST_EMAILS.includes(currentUser.email.toLowerCase()) : false;
+
     const value = {
         currentUser,
         role,
+        isTestUser,
         loading,
         login,
         logout

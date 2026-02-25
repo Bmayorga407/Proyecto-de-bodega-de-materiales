@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 
 export const Layout = () => {
     const navigate = useNavigate();
-    const { logout, currentUser, role } = useAuth();
+    const { logout, currentUser, role, isTestUser } = useAuth();
 
     const handleLogout = async () => {
         try {
@@ -22,7 +22,13 @@ export const Layout = () => {
                     <div className="flex justify-between items-center h-16">
                         <div className="flex items-center gap-2">
                             <Package size={24} />
-                            <span className="font-bold text-xl tracking-wide">Bodega <span className="text-black ml-1">Coca-Cola Concepción</span></span>
+                            <span className="font-bold text-xl tracking-wide hidden sm:inline">Bodega <span className="text-black ml-1">Coca-Cola Concepción</span></span>
+                            <span className="font-bold text-xl tracking-wide sm:hidden">Bodega</span>
+                            {isTestUser && (
+                                <span className="ml-2 px-2 py-0.5 mt-0.5 bg-yellow-400 text-black text-[10px] font-black tracking-widest uppercase rounded rounded-tl-none rounded-br-none shadow animate-pulse border-white border">
+                                    Testing
+                                </span>
+                            )}
                         </div>
                         <div className="flex items-center gap-4">
                             {currentUser && (
