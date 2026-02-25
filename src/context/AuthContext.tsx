@@ -6,6 +6,7 @@ import {
     User
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
+import { setInventoryUserEmail } from '../services/inventoryService';
 
 type Role = 'BODEGA' | 'VENTAS' | 'SUPERVISOR' | null;
 
@@ -64,6 +65,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const unsubscribe = onAuthStateChanged(auth, (user) => {
             setCurrentUser(user);
             setRole(determineRole(user?.email || null));
+            setInventoryUserEmail(user?.email || null);
             setLoading(false);
         });
 

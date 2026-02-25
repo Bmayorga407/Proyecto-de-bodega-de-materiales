@@ -56,6 +56,28 @@ const sheets = google.sheets({ version: 'v4', auth });
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 
 // ----------------------------------------------------
+// TEST ENVIRONMENT UTILS
+// ----------------------------------------------------
+const TEST_EMAILS = [
+    'brian.mayorga@coca-cola.local', // Test Bodega
+    'ventas1@coca-cola.local'        // Test Ventas
+];
+
+function getSheetNames(req) {
+    const userEmail = req.headers['x-user-email'];
+    if (userEmail && TEST_EMAILS.includes(userEmail.toLowerCase())) {
+        return {
+            inventoryTab: 'Pruebas_Hoja 1',
+            requestsTab: 'Pruebas_Solicitudes'
+        };
+    }
+    return {
+        inventoryTab: 'Hoja 1',
+        requestsTab: 'Solicitudes'
+    };
+}
+
+// ----------------------------------------------------
 // API ROUTES
 // ----------------------------------------------------
 
@@ -75,7 +97,7 @@ app.post('/api/products', async (req, res) => {
 
         const sheetRes = await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:I',
+            range: `${getSheetNames(req).inventoryTab}!A:J`,
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
@@ -95,7 +117,7 @@ app.get('/api/products', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:J',
+            range: `${getSheetNames(req).inventoryTab}!A:J`,
         });
 
         const rows = response.data.values;
@@ -133,13 +155,14 @@ app.delete('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
 
+        const { inventoryTab } = getSheetNames(req);
         const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
-        const sheetProperties = sheetMeta.data.sheets.find(s => s.properties.title === 'Hoja 1')?.properties;
+        const sheetProperties = sheetMeta.data.sheets.find(s => s.properties.title === inventoryTab)?.properties;
         if (!sheetProperties) return res.status(404).json({ error: 'Sheet not found' });
 
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:A',
+            range: `${inventoryTab}!A:A`,
         });
         const rows = getRes.data.values;
         if (!rows) return res.status(404).json({ error: 'No data' });
@@ -183,9 +206,10 @@ app.put('/api/products/:id', async (req, res) => {
         const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '', editedBy = '' } = req.body;
 
         // Fetch all rows to find the exact rowIndex for the given ID
+        const { inventoryTab } = getSheetNames(req);
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:J',
+            range: `${inventoryTab}!A:J`,
         });
 
         const rows = getRes.data.values;
@@ -203,7 +227,7 @@ app.put('/api/products/:id', async (req, res) => {
         if (rowIndex === -1) return res.status(404).json({ error: 'Product not found' });
 
         // Build the update row (maintaining the original productId timestamp)
-        const updateRange = `Hoja 1!A${rowIndex}:J${rowIndex}`;
+        const updateRange = `${inventoryTab}!A${rowIndex}:J${rowIndex}`;
         const resource = {
             values: [
                 [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy, editedBy]
@@ -238,7 +262,7 @@ app.post('/api/solicitudes', async (req, res) => {
         };
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Solicitudes!A:I',
+            range: `${getSheetNames(req).requestsTab}!A:I`,
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
@@ -253,7 +277,7 @@ app.get('/api/solicitudes', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Solicitudes!A:I',
+            range: `${getSheetNames(req).requestsTab}!A:I`,
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return res.status(200).json([]);
@@ -281,9 +305,10 @@ app.put('/api/solicitudes/:id', async (req, res) => {
         const requestId = req.params.id;
         const { productCode, productName, quantity, requestedBy, status, dateRequested, processedBy = '', requesterEmail = '' } = req.body;
 
+        const { requestsTab } = getSheetNames(req);
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Solicitudes!A:I',
+            range: `${requestsTab}!A:I`,
         });
         const rows = getRes.data.values;
         if (!rows) return res.status(404).json({ error: 'No data' });
@@ -297,7 +322,7 @@ app.put('/api/solicitudes/:id', async (req, res) => {
         }
         if (rowIndex === -1) return res.status(404).json({ error: 'Request not found' });
 
-        const updateRange = `Solicitudes!A${rowIndex}:I${rowIndex}`;
+        const updateRange = `${requestsTab}!A${rowIndex}:I${rowIndex}`;
         const resource = {
             values: [
                 [requestId, productCode, productName, quantity, requestedBy, status, dateRequested, processedBy, requesterEmail]
