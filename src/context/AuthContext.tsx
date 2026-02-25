@@ -7,7 +7,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
 
-type Role = 'BODEGA' | 'VENTAS' | null;
+type Role = 'BODEGA' | 'VENTAS' | 'SUPERVISOR' | null;
 
 interface AuthContextType {
     currentUser: User | null;
@@ -25,16 +25,34 @@ export const useAuth = () => {
     return context;
 };
 
-// Simple role determination logic:
-// If email contains "bodeg", role is BODEGA
-// If email contains "ventas", role is VENTAS
-// Otherwise, default to VENTAS (read-only)
+// Correos exclusivos y cerrados para el rol de VENTAS
+const VENTAS_EMAILS = [
+    'ventas1@coca-cola.local',
+    'ventas@coca-cola.local',
+    // <-- Añadir aquí futuros correos de ventas
+];
+
+// Correos exclusivos para SUPERVISOR (próximamente)
+const SUPERVISOR_EMAILS = [
+    'supervisor@coca-cola.local'
+];
+
 const determineRole = (email: string | null): Role => {
     if (!email) return null;
     const lowerEmail = email.toLowerCase();
-    if (lowerEmail.includes('bodeg')) return 'BODEGA';
-    if (lowerEmail.includes('ventas')) return 'VENTAS';
-    return 'VENTAS'; // fallback
+
+    // 1. Check if Supervisor
+    if (SUPERVISOR_EMAILS.includes(lowerEmail)) {
+        return 'SUPERVISOR';
+    }
+
+    // 2. Check if Ventas
+    if (VENTAS_EMAILS.includes(lowerEmail) || lowerEmail.includes('ventas')) {
+        return 'VENTAS';
+    }
+
+    // 3. Fallback: Everyone else (brianmayorga@, yerko@, etc) defaults to Bodega
+    return 'BODEGA';
 };
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {

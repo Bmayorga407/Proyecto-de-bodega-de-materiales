@@ -1,9 +1,29 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X } from 'lucide-react';
+import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2 } from 'lucide-react';
 import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
+
+const formatDisplayName = (emailStr: string | undefined): string => {
+    if (!emailStr) return 'Bodega (Anterior)';
+    if (emailStr === 'Bodega Desconocida') return emailStr;
+    if (emailStr.includes(' ')) return emailStr; // Ya está formateado
+
+    const namePart = emailStr.split('@')[0];
+    const parts = namePart.split(/[._-]/);
+
+    if (parts.length > 1) {
+        return parts.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    }
+
+    const withSpaces = namePart.replace(/([A-Z])/g, ' $1').trim();
+    if (withSpaces !== namePart && withSpaces.length > 0) {
+        return withSpaces.split(' ').map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(' ');
+    }
+
+    return namePart.charAt(0).toUpperCase() + namePart.slice(1);
+};
 
 export default function ProductDetails() {
     const { code } = useParams();
@@ -15,6 +35,11 @@ export default function ProductDetails() {
     const [products, setProducts] = useState<Product[]>([]);
 
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+    const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+    const [requestName, setRequestName] = useState('');
+    const [requestQty, setRequestQty] = useState(1);
+    const [isRequesting, setIsRequesting] = useState(false);
+    const [requestSuccess, setRequestSuccess] = useState('');
     const [formData, setFormData] = useState<Partial<Product>>({
         name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0]
     });
@@ -99,6 +124,78 @@ export default function ProductDetails() {
     const baseProduct = products[0];
     const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
 
+    const stockByLocation: Record<string, number> = {};
+    let unallocatedNegative = 0;
+
+    // Fase 1: Asignar stock positivo a sus ubicaciones y stock negativo etiquetado
+    products.forEach(p => {
+        if (p.stock > 0) {
+            const loc = (p.details || 'Sin ubicación').trim();
+            stockByLocation[loc] = (stockByLocation[loc] || 0) + p.stock;
+        } else {
+            // Es una salida. Buscar etiqueta [Ubicación] insertada por el nuevo sistema
+            const match = p.details?.match(/^\[(.*?)\]/);
+            if (match) {
+                const loc = match[1].trim();
+                stockByLocation[loc] = (stockByLocation[loc] || 0) + p.stock;
+            } else {
+                // Salidas del sistema antiguo sin etiqueta de ubicación
+                unallocatedNegative += p.stock; // esto es un número negativo
+            }
+        }
+    });
+
+    // Fase 2: Distribuir las salidas antiguas (negativas) entre las ubicaciones con saldo positivo
+    if (unallocatedNegative < 0) {
+        for (const loc of Object.keys(stockByLocation)) {
+            if (unallocatedNegative >= 0) break;
+
+            if (stockByLocation[loc] > 0) {
+                // Cuánto podemos descontar de esta ubicación
+                const available = stockByLocation[loc];
+                const deduction = Math.min(available, Math.abs(unallocatedNegative));
+
+                stockByLocation[loc] -= deduction;
+                unallocatedNegative += deduction; // Se acerca a 0
+            }
+        }
+    }
+
+    const handleCreateRequest = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!baseProduct) return;
+        if (requestQty < 1 || requestQty > totalStock) {
+            alert('Cantidad inválida o superior al stock disponible.');
+            return;
+        }
+        if (!requestName.trim()) {
+            alert('Por favor, ingresa tu nombre y apellido.');
+            return;
+        }
+
+        setIsRequesting(true);
+        try {
+            await inventoryService.createRequest({
+                productCode: baseProduct.code,
+                productName: baseProduct.name,
+                quantity: requestQty,
+                requestedBy: requestName.trim()
+            });
+            setRequestSuccess('Solicitud enviada a bodega con éxito.');
+            setTimeout(() => {
+                setIsRequestModalOpen(false);
+                setRequestSuccess('');
+                setRequestQty(1);
+                setRequestName('');
+            }, 2500);
+        } catch (err) {
+            console.error(err);
+            alert('Error al enviar la solicitud.');
+        } finally {
+            setIsRequesting(false);
+        }
+    };
+
     return (
         <div className="space-y-6 max-w-5xl mx-auto pb-12">
             {/* Cabecera / Foto Fotorealista que se desvanece */}
@@ -160,9 +257,27 @@ export default function ProductDetails() {
                         <div className="bg-red-50 border border-red-100/50 p-6 rounded-2xl text-center shadow-inner">
                             <p className="text-sm text-red-600 font-bold uppercase tracking-widest mb-1">Stock Disponible</p>
                             <p className="text-5xl font-black text-coca-red drop-shadow-sm">{totalStock}</p>
+
+                            {/* Stock por ubicación */}
+                            {Object.entries(stockByLocation).filter(([_, qty]) => qty > 0).length > 0 && (
+                                <div className="mt-5 pt-4 border-t border-red-200/60 flex flex-col gap-2 text-sm">
+                                    <p className="text-xs text-red-800/60 font-medium uppercase tracking-wider mb-1">Por Ubicación</p>
+                                    {Object.entries(stockByLocation)
+                                        .filter(([_, qty]) => qty > 0)
+                                        .map(([loc, qty]) => (
+                                            <div key={loc} className="flex justify-between items-center text-red-900 bg-white/40 px-3 py-1.5 rounded-lg border border-red-100/50">
+                                                <span className="truncate pr-3 font-medium">{loc}</span>
+                                                <span className="font-bold bg-white px-2.5 py-1 rounded-md text-coca-red shadow-sm border border-red-100/30 whitespace-nowrap">{qty} uds</span>
+                                            </div>
+                                        ))}
+                                </div>
+                            )}
                         </div>
                         {role === 'VENTAS' && (
-                            <button className="flex items-center justify-center gap-2 bg-coca-black text-white px-6 py-4 rounded-xl hover:bg-gray-800 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold w-full active:scale-95 text-lg">
+                            <button
+                                onClick={() => setIsRequestModalOpen(true)}
+                                className="w-full sm:w-auto bg-coca-black text-white px-6 py-4 rounded-xl hover:bg-gray-800 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold active:scale-95 text-lg flex items-center justify-center gap-2"
+                            >
                                 <Send size={20} />
                                 Solicitar Material
                             </button>
@@ -202,7 +317,7 @@ export default function ProductDetails() {
                             <button disabled={isSaving} type="button" onClick={() => setEditingProduct(null)} className="px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-lg font-medium">
                                 Cancelar
                             </button>
-                            <button disabled={isSaving} type="submit" className={`px-4 py-2 text-sm text-white rounded-lg font-medium flex items-center gap-2 
+                            <button disabled={isSaving} type="submit" className={`px-4 py-2 text-sm text-white rounded-lg font-medium flex items-center gap-2
                                 ${isSaving ? 'bg-gray-400' : 'bg-coca-black hover:bg-gray-800'}`}>
                                 {isSaving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Actualizar Fila
                             </button>
@@ -245,7 +360,9 @@ export default function ProductDetails() {
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
                                                 <User size={14} className="text-gray-400" />
-                                                <span className="text-xs text-gray-600 font-medium">BODEGA S. (Proximamente)</span>
+                                                <span className="text-xs text-gray-600 font-medium whitespace-break-spaces break-all">
+                                                    {formatDisplayName(p.registeredBy)}
+                                                </span>
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-1">
@@ -264,6 +381,67 @@ export default function ProductDetails() {
                 </div>
             )}
 
+            {/* Modal de Solicitud de Venta */}
+            {isRequestModalOpen && (
+                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative animate-in fade-in zoom-in-95">
+                        <button onClick={() => setIsRequestModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-900 bg-gray-100 p-2 rounded-full transition-colors">
+                            <X size={20} />
+                        </button>
+
+                        <div className="mb-6">
+                            <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 text-coca-red">
+                                <Send size={24} />
+                            </div>
+                            <h2 className="text-xl font-bold text-gray-900">Solicitar Material</h2>
+                            <p className="text-sm text-gray-500 mt-1">Ingresa la cantidad que necesitas de {baseProduct.name}.</p>
+                        </div>
+
+                        {requestSuccess ? (
+                            <div className="bg-green-50 text-green-700 p-4 rounded-xl font-medium flex items-center justify-center gap-2">
+                                <CheckCircle2 size={20} />
+                                {requestSuccess}
+                            </div>
+                        ) : (
+                            <form onSubmit={handleCreateRequest} className="space-y-5">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Tu Nombre y Apellido</label>
+                                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
+                                        <div className="pl-3 py-3 flex items-center justify-center text-gray-400">
+                                            <User size={18} />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            required
+                                            placeholder="Ej. Juan Pérez"
+                                            className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full"
+                                            value={requestName}
+                                            onChange={(e) => setRequestName(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Cantidad a Retirar</label>
+                                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 p-1">
+                                        <button type="button" onClick={() => setRequestQty(Math.max(1, requestQty - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
+                                        <input type="number" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
+                                        <button type="button" onClick={() => setRequestQty(Math.min(totalStock, requestQty + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
+                                    </div>
+                                    <div className="flex justify-between mt-2 text-xs font-semibold px-1">
+                                        <span className="text-gray-500">Mínimo: 1</span>
+                                        <span className="text-gray-500">Máximo: {totalStock} disp.</span>
+                                    </div>
+                                </div>
+                                <button type="submit" disabled={isRequesting || requestQty > totalStock || !requestName.trim()} className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                    ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed text-gray-100' : 'bg-coca-red hover:bg-red-700 hover:shadow-lg'}`}>
+                                    {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                    {isRequesting ? 'Enviando a Bodega...' : 'Confirmar Solicitud'}
+                                </button>
+                            </form>
+                        )}
+                    </div>
+                </div>
+            )}
             <div className="md:hidden mt-8 text-center pt-8 border-t">
                 <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-coca-black inline-flex items-center gap-2 font-medium">
                     <ArrowLeft size={18} /> Volver

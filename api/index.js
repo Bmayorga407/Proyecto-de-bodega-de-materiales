@@ -65,17 +65,17 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/products', async (req, res) => {
     try {
-        const { name, code, description, stock, details, imageUrl = '', entryDate = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl = '', entryDate = '', registeredBy = '' } = req.body;
 
         const resource = {
             values: [
-                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate]
+                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate, registeredBy]
             ],
         };
 
         const sheetRes = await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:A',
+            range: 'Hoja 1!A:I',
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
@@ -95,7 +95,7 @@ app.get('/api/products', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:H',
+            range: 'Hoja 1!A:I',
         });
 
         const rows = response.data.values;
@@ -116,7 +116,8 @@ app.get('/api/products', async (req, res) => {
                 stock: Number(row[4]) || 0,
                 imageUrl: row[5] || '',
                 details: row[6] || '',
-                entryDate: row[7] || ''
+                entryDate: row[7] || '',
+                registeredBy: row[8] || ''
             };
         }).filter(p => p.id && p.id.trim() !== '');
 
@@ -178,12 +179,12 @@ app.delete('/api/products/:id', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
-        const { name, code, description, stock, details, imageUrl, entryDate = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '' } = req.body;
 
         // Fetch all rows to find the exact rowIndex for the given ID
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:H',
+            range: 'Hoja 1!A:I',
         });
 
         const rows = getRes.data.values;
@@ -201,10 +202,10 @@ app.put('/api/products/:id', async (req, res) => {
         if (rowIndex === -1) return res.status(404).json({ error: 'Product not found' });
 
         // Build the update row (maintaining the original productId timestamp)
-        const updateRange = `Hoja 1!A${rowIndex}:H${rowIndex}`;
+        const updateRange = `Hoja 1!A${rowIndex}:I${rowIndex}`;
         const resource = {
             values: [
-                [productId, code, name, description, stock, imageUrl, details, entryDate]
+                [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy]
             ],
         };
 
@@ -219,6 +220,96 @@ app.put('/api/products/:id', async (req, res) => {
     } catch (error) {
         console.error('Error updating product:', error);
         res.status(500).json({ error: 'Failed to update product' });
+    }
+});
+
+// ----------------------------------------------------
+// SOLICITUDES API ROUTES (Tab "Solicitudes")
+// ----------------------------------------------------
+
+app.post('/api/solicitudes', async (req, res) => {
+    try {
+        const { productCode, productName, quantity, requestedBy, status = 'PENDIENTE', dateRequested = new Date().toISOString() } = req.body;
+        const resource = {
+            values: [
+                [Date.now().toString(), productCode, productName, quantity, requestedBy, status, dateRequested]
+            ],
+        };
+        await sheets.spreadsheets.values.append({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Solicitudes!A:A',
+            valueInputOption: 'USER_ENTERED',
+            requestBody: resource,
+        });
+        res.status(200).json({ success: true, message: 'Request added successfully' });
+    } catch (error) {
+        console.error('Error adding request:', error);
+        res.status(500).json({ success: false, error: 'Failed to add request' });
+    }
+});
+
+app.get('/api/solicitudes', async (req, res) => {
+    try {
+        const response = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Solicitudes!A:G',
+        });
+        const rows = response.data.values;
+        if (!rows || rows.length === 0) return res.status(200).json([]);
+        const data = rows[0][0]?.toLowerCase().includes('id') ? rows.slice(1) : rows;
+        const requests = data.map(row => ({
+            id: row[0] || '',
+            productCode: row[1] || '',
+            productName: row[2] || '',
+            quantity: Number(row[3]) || 0,
+            requestedBy: row[4] || '',
+            status: row[5] || 'PENDIENTE',
+            dateRequested: row[6] || ''
+        })).filter(r => r.id && r.id.trim() !== '');
+        res.status(200).json(requests);
+    } catch (error) {
+        console.error('Error fetching requests from Sheets:', error);
+        res.status(500).json({ error: 'Failed to fetch requests' });
+    }
+});
+
+app.put('/api/solicitudes/:id', async (req, res) => {
+    try {
+        const requestId = req.params.id;
+        const { productCode, productName, quantity, requestedBy, status, dateRequested } = req.body;
+
+        const getRes = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: 'Solicitudes!A:G',
+        });
+        const rows = getRes.data.values;
+        if (!rows) return res.status(404).json({ error: 'No data' });
+
+        let rowIndex = -1;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === requestId) {
+                rowIndex = i + 1;
+                break;
+            }
+        }
+        if (rowIndex === -1) return res.status(404).json({ error: 'Request not found' });
+
+        const updateRange = `Solicitudes!A${rowIndex}:G${rowIndex}`;
+        const resource = {
+            values: [
+                [requestId, productCode, productName, quantity, requestedBy, status, dateRequested]
+            ],
+        };
+        await sheets.spreadsheets.values.update({
+            spreadsheetId: SPREADSHEET_ID,
+            range: updateRange,
+            valueInputOption: 'USER_ENTERED',
+            requestBody: resource,
+        });
+        res.status(200).json({ success: true, message: 'Updated successfully' });
+    } catch (error) {
+        console.error('Error updating request:', error);
+        res.status(500).json({ error: 'Failed to update request' });
     }
 });
 

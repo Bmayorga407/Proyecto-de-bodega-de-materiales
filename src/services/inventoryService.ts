@@ -66,7 +66,8 @@ export const inventoryService = {
                 stock: data.stock || 0,
                 details: data.details || '',
                 entryDate: data.entryDate || new Date().toISOString().split('T')[0],
-                imageUrl: directImageUrl // Base64 string will be saved directly into Google Sheets!
+                imageUrl: directImageUrl, // Base64 string will be saved directly into Google Sheets!
+                registeredBy: data.registeredBy || ''
             };
 
             const response = await axios.post(`${API_URL}/products`, payload);
@@ -143,6 +144,39 @@ export const inventoryService = {
             return response.data;
         } catch (error) {
             console.error('Error updating product:', error);
+            throw error;
+        }
+    },
+
+    // ----------------------------------------------------
+    // SOLICITUDES API (Tab "Solicitudes")
+    // ----------------------------------------------------
+    fetchRequests: async (): Promise<any[]> => {
+        try {
+            const response = await axios.get(`${API_URL}/solicitudes`);
+            return response.data;
+        } catch (error) {
+            console.error('Error fetching requests:', error);
+            throw error;
+        }
+    },
+
+    createRequest: async (data: any): Promise<any> => {
+        try {
+            const response = await axios.post(`${API_URL}/solicitudes`, data);
+            return response.data;
+        } catch (error) {
+            console.error('Error creating request:', error);
+            throw error;
+        }
+    },
+
+    updateRequest: async (id: string, data: any): Promise<any> => {
+        try {
+            const response = await axios.put(`${API_URL}/solicitudes/${id}`, data);
+            return response.data;
+        } catch (error) {
+            console.error('Error updating request:', error);
             throw error;
         }
     }

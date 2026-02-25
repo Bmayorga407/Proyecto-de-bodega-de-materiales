@@ -8,6 +8,7 @@ export interface Product {
     imageUrl: string;
     details: string;
     entryDate?: string;
+    registeredBy?: string;
 }
 
 export interface UserContextType {
@@ -15,4 +16,16 @@ export interface UserContextType {
     role: 'BODEGA' | 'VENTAS' | null;
     login: (email: string) => void;
     logout: () => void;
+}
+
+export type RequestStatus = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ENTREGADA';
+
+export interface OrderRequest {
+    id: string;
+    productCode: string;
+    productName: string;
+    quantity: number;
+    requestedBy: string; // Email of the Ventas user
+    status: RequestStatus;
+    dateRequested: string;
 }
