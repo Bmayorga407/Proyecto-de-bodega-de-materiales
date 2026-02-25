@@ -9,6 +9,7 @@ export interface Product {
     details: string;
     entryDate?: string;
     registeredBy?: string;
+    editedBy?: string;
 }
 
 export interface UserContextType {

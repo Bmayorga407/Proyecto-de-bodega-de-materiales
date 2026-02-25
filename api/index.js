@@ -95,7 +95,7 @@ app.get('/api/products', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:I',
+            range: 'Hoja 1!A:J',
         });
 
         const rows = response.data.values;
@@ -117,7 +117,8 @@ app.get('/api/products', async (req, res) => {
                 imageUrl: row[5] || '',
                 details: row[6] || '',
                 entryDate: row[7] || '',
-                registeredBy: row[8] || ''
+                registeredBy: row[8] || '',
+                editedBy: row[9] || ''
             };
         }).filter(p => p.id && p.id.trim() !== '');
 
@@ -179,12 +180,12 @@ app.delete('/api/products/:id', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
-        const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '', editedBy = '' } = req.body;
 
         // Fetch all rows to find the exact rowIndex for the given ID
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: 'Hoja 1!A:I',
+            range: 'Hoja 1!A:J',
         });
 
         const rows = getRes.data.values;
@@ -202,10 +203,10 @@ app.put('/api/products/:id', async (req, res) => {
         if (rowIndex === -1) return res.status(404).json({ error: 'Product not found' });
 
         // Build the update row (maintaining the original productId timestamp)
-        const updateRange = `Hoja 1!A${rowIndex}:I${rowIndex}`;
+        const updateRange = `Hoja 1!A${rowIndex}:J${rowIndex}`;
         const resource = {
             values: [
-                [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy]
+                [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy, editedBy]
             ],
         };
 

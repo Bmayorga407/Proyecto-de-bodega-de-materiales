@@ -130,7 +130,10 @@ export default function ProductDetails() {
 
         setIsSaving(true);
         try {
-            await inventoryService.updateProduct(editingProduct.id, formData);
+            await inventoryService.updateProduct(editingProduct.id, {
+                ...formData,
+                editedBy: currentUser?.email
+            });
             setEditingProduct(null);
             setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: '' });
             showSuccess('Registro actualizado correctamente.');
@@ -461,11 +464,21 @@ export default function ProductDetails() {
                                             {p.details || <span className="text-gray-300 italic">Sin ubicación</span>}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
-                                                <User size={14} className="text-gray-400" />
-                                                <span className="text-xs text-gray-600 font-medium whitespace-break-spaces break-all">
-                                                    {formatDisplayName(p.registeredBy)}
-                                                </span>
+                                            <div className="flex flex-col gap-1.5">
+                                                <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
+                                                    <User size={14} className="text-gray-400" />
+                                                    <span className="text-xs text-gray-600 font-medium whitespace-break-spaces break-all">
+                                                        {formatDisplayName(p.registeredBy)}
+                                                    </span>
+                                                </div>
+                                                {p.editedBy && (
+                                                    <div className="flex items-center gap-2 px-2 py-1 bg-blue-50 border border-blue-100 rounded-full w-fit">
+                                                        <Edit2 size={12} className="text-blue-400" />
+                                                        <span className="text-[10px] uppercase tracking-wider text-blue-600 font-bold whitespace-break-spaces break-all">
+                                                            {formatDisplayName(p.editedBy)}
+                                                        </span>
+                                                    </div>
+                                                )}
                                             </div>
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-1">
