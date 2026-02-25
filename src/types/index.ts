@@ -18,14 +18,16 @@ export interface UserContextType {
     logout: () => void;
 }
 
-export type RequestStatus = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ENTREGADA';
+export type RequestStatus = 'PENDIENTE' | 'APROBADA' | 'RECHAZADA' | 'ENTREGADA' | 'CANCELADA';
 
 export interface OrderRequest {
     id: string;
     productCode: string;
     productName: string;
     quantity: number;
-    requestedBy: string; // Email of the Ventas user
+    requestedBy: string; // The human name they typed
     status: RequestStatus;
     dateRequested: string;
+    processedBy?: string; // Email of the Bodega user who approved/rejected/delivered
+    requesterEmail?: string; // Email of the Ventas user who created it
 }

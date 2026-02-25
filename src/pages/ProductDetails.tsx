@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2 } from 'lucide-react';
+import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
@@ -28,30 +28,73 @@ const formatDisplayName = (emailStr: string | undefined): string => {
 export default function ProductDetails() {
     const { code } = useParams();
     const navigate = useNavigate();
-    const { role } = useAuth();
+    const { role, currentUser } = useAuth();
 
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
+    const [pendingRequestsStock, setPendingRequestsStock] = useState(0);
 
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
     const [requestName, setRequestName] = useState('');
     const [requestQty, setRequestQty] = useState(1);
+
+    // New Sort/Filter State
+    const [sortDesc, setSortDesc] = useState(true);
+    const [filterReceptor, setFilterReceptor] = useState('');
+
     const [isRequesting, setIsRequesting] = useState(false);
     const [requestSuccess, setRequestSuccess] = useState('');
+    const [successMsg, setSuccessMsg] = useState('');
+    const [errorMsg, setErrorMsg] = useState('');
+    const [productToDelete, setProductToDelete] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Product>>({
         name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0]
     });
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
+    const showError = (msg: string) => {
+        setErrorMsg(msg);
+        setTimeout(() => setErrorMsg(''), 4500);
+    };
+
+    const showSuccess = (msg: string) => {
+        setSuccessMsg(msg);
+        setTimeout(() => setSuccessMsg(''), 4500);
+    };
+
+    const fetchPendingRequestsBackground = async () => {
+        if (!code) return;
+        try {
+            const requestsData = await inventoryService.fetchRequests();
+            const pendingQty = requestsData
+                .filter(r => r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code.toLowerCase())
+                .reduce((sum, r) => sum + r.quantity, 0);
+            setPendingRequestsStock(pendingQty);
+        } catch (e) {
+            console.error('Error fetching background requests:', e);
+        }
+    };
+
     const loadProducts = async () => {
         try {
             setIsLoading(true);
-            const data = await inventoryService.fetchProducts();
+            const [data, requestsData] = await Promise.all([
+                inventoryService.fetchProducts(),
+                inventoryService.fetchRequests()
+            ]);
+
             // Filtrar solo los movimientos que coincidan con el código de la URL
-            const filtered = data.filter(p => p.code.toLowerCase() === code?.toLowerCase());
-            setProducts(filtered);
+            const filteredProducts = data.filter(p => p.code.toLowerCase() === code?.toLowerCase());
+            setProducts(filteredProducts);
+
+            // Calcular solicitudes pendientes de otros/este usuario para advertencia de stock
+            const pendingQty = requestsData
+                .filter(r => r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code?.toLowerCase())
+                .reduce((sum, r) => sum + r.quantity, 0);
+            setPendingRequestsStock(pendingQty);
+
         } catch (e) {
             console.error(e);
         } finally {
@@ -62,6 +105,19 @@ export default function ProductDetails() {
     useEffect(() => {
         loadProducts();
     }, [code]);
+
+    // Polling background effect for the active modal
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (isRequestModalOpen) {
+            // Fetch immediately upon opening, then every 3.5 seconds
+            fetchPendingRequestsBackground();
+            interval = setInterval(fetchPendingRequestsBackground, 3500);
+        }
+        return () => {
+            if (interval) clearInterval(interval);
+        };
+    }, [isRequestModalOpen, code]);
 
     const handleEditClick = (product: Product) => {
         setEditingProduct(product);
@@ -77,28 +133,41 @@ export default function ProductDetails() {
             await inventoryService.updateProduct(editingProduct.id, formData);
             setEditingProduct(null);
             setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: '' });
+            showSuccess('Registro actualizado correctamente.');
             loadProducts();
         } catch (err) {
             console.error(err);
-            alert("Hubo un error al actualizar el registro.");
+            showError("Hubo un error al actualizar el registro.");
         } finally {
             setIsSaving(false);
         }
     };
 
-    const handleDelete = async (id: string) => {
-        if (window.confirm('¿Seguro que deseas eliminar este registro específico de bodega?')) {
-            try {
-                setIsLoading(true);
-                await inventoryService.deleteProduct(id);
-                await loadProducts();
-            } catch (e) {
-                console.error(e);
-                alert("Error al eliminar.");
-                setIsLoading(false);
-            }
+    const confirmDelete = async () => {
+        if (!productToDelete) return;
+        try {
+            setIsLoading(true);
+            await inventoryService.deleteProduct(productToDelete);
+            setProductToDelete(null);
+            showSuccess('Registro eliminado correctamente.');
+            await loadProducts();
+        } catch (e) {
+            console.error(e);
+            showError("Error al eliminar el registro.");
+            setIsLoading(false);
         }
     };
+
+    const processedMovements = useMemo(() => {
+        let result = [...products];
+        if (filterReceptor) {
+            result = result.filter(p => p.details && p.details.toLowerCase().includes(filterReceptor.toLowerCase()));
+        }
+        if (sortDesc) {
+            result.reverse();
+        }
+        return result;
+    }, [products, sortDesc, filterReceptor]);
 
     if (isLoading) {
         return (
@@ -165,11 +234,12 @@ export default function ProductDetails() {
         e.preventDefault();
         if (!baseProduct) return;
         if (requestQty < 1 || requestQty > totalStock) {
-            alert('Cantidad inválida o superior al stock disponible.');
+            showError('Cantidad inválida o superior al stock disponible.');
             return;
         }
-        if (!requestName.trim()) {
-            alert('Por favor, ingresa tu nombre y apellido.');
+        const nameParts = requestName.trim().split(/\s+/);
+        if (nameParts.length < 2) {
+            showError('RECHAZADO: Debes ingresar tu nombre Y tu apellido para solicitar.');
             return;
         }
 
@@ -179,7 +249,8 @@ export default function ProductDetails() {
                 productCode: baseProduct.code,
                 productName: baseProduct.name,
                 quantity: requestQty,
-                requestedBy: requestName.trim()
+                requestedBy: requestName.trim(),
+                requesterEmail: currentUser?.email || ''
             });
             setRequestSuccess('Solicitud enviada a bodega con éxito.');
             setTimeout(() => {
@@ -190,7 +261,7 @@ export default function ProductDetails() {
             }, 2500);
         } catch (err) {
             console.error(err);
-            alert('Error al enviar la solicitud.');
+            showError('Error al enviar la solicitud.');
         } finally {
             setIsRequesting(false);
         }
@@ -198,6 +269,23 @@ export default function ProductDetails() {
 
     return (
         <div className="space-y-6 max-w-5xl mx-auto pb-12">
+            {/* Success Notification */}
+            {successMsg && (
+                <div className="fixed top-4 right-4 bg-green-50 text-green-800 border-l-4 border-green-500 p-4 rounded shadow-lg z-[200] flex items-center gap-3 animate-in slide-in-from-top-2">
+                    <CheckCircle2 size={20} className="text-green-500" />
+                    <p className="font-medium text-sm">{successMsg}</p>
+                </div>
+            )}
+
+            {/* Error Notification */}
+            {errorMsg && (
+                <div className="fixed top-4 right-4 bg-red-50 text-red-800 border-l-4 border-red-500 p-4 rounded shadow-lg z-[200] flex items-center gap-3 animate-in slide-in-from-top-2 max-w-sm">
+                    <AlertTriangle size={20} className="text-red-500 flex-shrink-0" />
+                    <p className="font-medium text-sm">{errorMsg}</p>
+                    <button onClick={() => setErrorMsg('')} className="ml-auto text-red-400 hover:text-red-600"><X size={16} /></button>
+                </div>
+            )}
+
             {/* Cabecera / Foto Fotorealista que se desvanece */}
             <div className="relative w-auto h-56 md:h-80 -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 border-b border-gray-100/50 mb-8 cursor-pointer group overflow-hidden bg-white" onClick={() => setIsImageModalOpen(true)}>
 
@@ -267,7 +355,7 @@ export default function ProductDetails() {
                                         .map(([loc, qty]) => (
                                             <div key={loc} className="flex justify-between items-center text-red-900 bg-white/40 px-3 py-1.5 rounded-lg border border-red-100/50">
                                                 <span className="truncate pr-3 font-medium">{loc}</span>
-                                                <span className="font-bold bg-white px-2.5 py-1 rounded-md text-coca-red shadow-sm border border-red-100/30 whitespace-nowrap">{qty} uds</span>
+                                                <span className="font-bold bg-white px-2.5 py-1 rounded-md text-coca-red shadow-sm border border-red-100/30 whitespace-nowrap">{qty} UN</span>
                                             </div>
                                         ))}
                                 </div>
@@ -329,8 +417,23 @@ export default function ProductDetails() {
             {/* Tabla de Movimientos de Bodega */}
             {role === 'BODEGA' && (
                 <div className="bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
-                    <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center gap-2">
+                    <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                         <h2 className="font-semibold text-gray-800">Historial de Ingresos / Asignaciones</h2>
+                        <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
+                            <input
+                                type="text"
+                                placeholder="Filtrar por vendedor/receptor..."
+                                value={filterReceptor}
+                                onChange={(e) => setFilterReceptor(e.target.value)}
+                                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-coca-red outline-none w-full sm:w-64 shadow-sm"
+                            />
+                            <button
+                                onClick={() => setSortDesc(!sortDesc)}
+                                className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm font-medium hover:bg-gray-100 focus:ring-1 focus:ring-coca-red flex items-center justify-center gap-2 whitespace-nowrap bg-white text-gray-700 shadow-sm transition-colors cursor-pointer"
+                            >
+                                {sortDesc ? '↑ Más recientes primero' : '↓ Más antiguos primero'}
+                            </button>
+                        </div>
                     </div>
                     <div className="overflow-x-auto">
                         <table className="min-w-full divide-y divide-gray-200">
@@ -344,7 +447,7 @@ export default function ProductDetails() {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-100">
-                                {products.map(p => (
+                                {processedMovements.map((p: Product) => (
                                     <tr key={p.id} className={editingProduct?.id === p.id ? 'bg-red-50/50' : 'hover:bg-gray-50 transition-colors'}>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-l-2 border-transparent">
                                             {p.entryDate ? new Date(p.entryDate).toLocaleDateString() : '-'}
@@ -369,7 +472,7 @@ export default function ProductDetails() {
                                             <button onClick={() => handleEditClick(p)} className="text-blue-500 hover:text-blue-700 transition-colors p-1.5 rounded-full hover:bg-blue-50">
                                                 <Edit2 size={16} />
                                             </button>
-                                            <button onClick={() => handleDelete(p.id)} className="text-red-400 hover:text-red-700 transition-colors p-1.5 rounded-full hover:bg-red-50">
+                                            <button onClick={() => setProductToDelete(p.id)} className="text-red-400 hover:text-red-700 transition-colors p-1.5 rounded-full hover:bg-red-50">
                                                 <Trash2 size={16} />
                                             </button>
                                         </td>
@@ -381,6 +484,45 @@ export default function ProductDetails() {
                 </div>
             )}
 
+            {/* Modal de Confirmación de Eliminación */}
+            {productToDelete && (
+                <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
+                        <div className="p-5 flex items-start gap-4 border-b bg-red-50 border-red-100">
+                            <div className="p-2 rounded-full bg-red-100 text-red-600">
+                                <AlertTriangle size={24} />
+                            </div>
+                            <div className="flex-1 mt-1">
+                                <h3 className="text-xl font-bold text-gray-900">
+                                    Eliminar Registro
+                                </h3>
+                            </div>
+                            <button onClick={() => setProductToDelete(null)} className="text-gray-400 hover:text-gray-600 outline-none">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <p className="text-sm text-gray-600">
+                                ¿Estás seguro de que deseas eliminar este registro específico del historial de bodega? Esta acción alterará permanentemente la cantidad de stock disponible.
+                            </p>
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    onClick={() => setProductToDelete(null)}
+                                    className="flex-1 px-4 py-2 border rounded-lg text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    onClick={() => confirmDelete()}
+                                    className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                                >
+                                    Eliminar Fila
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
             {/* Modal de Solicitud de Venta */}
             {isRequestModalOpen && (
                 <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
@@ -395,6 +537,15 @@ export default function ProductDetails() {
                             </div>
                             <h2 className="text-xl font-bold text-gray-900">Solicitar Material</h2>
                             <p className="text-sm text-gray-500 mt-1">Ingresa la cantidad que necesitas de {baseProduct.name}.</p>
+
+                            {pendingRequestsStock > 0 && (totalStock - pendingRequestsStock < requestQty) && (
+                                <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-3 flex gap-3 text-orange-800 text-sm animate-in fade-in">
+                                    <AlertTriangle size={18} className="shrink-0 mt-0.5 text-orange-500" />
+                                    <div>
+                                        Ya hay <strong>{pendingRequestsStock} UN</strong> en lista de espera (pendientes de aprobación). Solo quedan <strong>{Math.max(0, totalStock - pendingRequestsStock)} UN vacantes</strong>. Puedes pedirlo igual, pero bodega podría entregarte solo una fracción o cancelar si se agotan.
+                                    </div>
+                                </div>
+                            )}
                         </div>
 
                         {requestSuccess ? (

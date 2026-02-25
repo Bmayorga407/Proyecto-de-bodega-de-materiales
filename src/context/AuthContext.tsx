@@ -47,11 +47,11 @@ const determineRole = (email: string | null): Role => {
     }
 
     // 2. Check if Ventas
-    if (VENTAS_EMAILS.includes(lowerEmail) || lowerEmail.includes('ventas')) {
+    if (VENTAS_EMAILS.includes(lowerEmail)) {
         return 'VENTAS';
     }
 
-    // 3. Fallback: Everyone else (brianmayorga@, yerko@, etc) defaults to Bodega
+    // 3. Fallback: Everyone else defaults to Bodega
     return 'BODEGA';
 };
 
