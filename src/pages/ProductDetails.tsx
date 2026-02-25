@@ -132,7 +132,7 @@ export default function ProductDetails() {
         try {
             await inventoryService.updateProduct(editingProduct.id, {
                 ...formData,
-                editedBy: currentUser?.email
+                editedBy: currentUser?.email || undefined
             });
             setEditingProduct(null);
             setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: '' });
