@@ -5,6 +5,11 @@ import { OrderRequest, Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
 
+const getLocalDateString = () => {
+    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+    return new Date(Date.now() - tzoffset).toISOString().split('T')[0];
+};
+
 export default function InventoryAdmin() {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
@@ -26,7 +31,7 @@ export default function InventoryAdmin() {
 
     // Form state
     const [formData, setFormData] = useState<Partial<Product>>({
-        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0]
+        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString()
     });
     const [conflictData, setConflictData] = useState<{ existing: Product, submitted: Partial<Product> } | null>(null);
     const [requestConfirm, setRequestConfirm] = useState<{ req: OrderRequest, status: OrderRequest['status'] } | null>(null);
@@ -561,7 +566,7 @@ export default function InventoryAdmin() {
                                     </div>
 
                                     <div className="pt-6 flex justify-end gap-3 border-t">
-                                        <button disabled={isSaving} type="button" onClick={() => { setFormMode('none'); setManualLocations([]); setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0] }); }} className="px-5 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+                                        <button disabled={isSaving} type="button" onClick={() => { setFormMode('none'); setManualLocations([]); setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString() }); }} className="px-5 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
                                             Cancelar
                                         </button>
                                         <button disabled={isSaving} type="submit" className={`px-5 py-2 text-white rounded-lg font-medium flex items-center gap-2 transition-all 

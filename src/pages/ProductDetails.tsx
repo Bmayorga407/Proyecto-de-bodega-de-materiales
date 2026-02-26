@@ -5,6 +5,11 @@ import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
 
+const getLocalDateString = () => {
+    const tzoffset = (new Date()).getTimezoneOffset() * 60000;
+    return new Date(Date.now() - tzoffset).toISOString().split('T')[0];
+};
+
 const formatDisplayName = (emailStr: string | undefined): string => {
     if (!emailStr) return 'Bodega (Anterior)';
     if (emailStr === 'Bodega Desconocida') return emailStr;
@@ -50,7 +55,7 @@ export default function ProductDetails() {
     const [errorMsg, setErrorMsg] = useState('');
     const [productToDelete, setProductToDelete] = useState<string | null>(null);
     const [formData, setFormData] = useState<Partial<Product>>({
-        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0]
+        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString()
     });
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
 
