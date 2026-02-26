@@ -437,14 +437,14 @@ export default function InventoryAdmin() {
                                                 value={formData.code} onChange={handleCodeChange} placeholder="Escribe el código para auto-rellenar..." />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Nombre {formMode === 'salida' && '(Automático)'}</label>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del producto {formMode === 'salida' && '(Automático)'}</label>
                                             <input required type="text" className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`}
                                                 value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} disabled={formMode === 'salida'} />
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Descripción {formMode === 'salida' && '(Automático)'}</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Descripción más detallada {formMode === 'salida' && '(Automático)'}</label>
                                         <textarea className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`} rows={3}
                                             value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} disabled={formMode === 'salida'} />
                                     </div>
