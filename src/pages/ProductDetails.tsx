@@ -30,6 +30,24 @@ const formatDisplayName = (emailStr: string | undefined): string => {
     return namePart.charAt(0).toUpperCase() + namePart.slice(1);
 };
 
+const extractLocationAndDetail = (detailsString: string | undefined) => {
+    if (!detailsString) return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: '-' };
+
+    // Check for [Location] Detail format
+    const match = detailsString.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+        return { location: match[1], detail: match[2] };
+    }
+
+    // Legacy fallback: Check if it looks like a manual exit without brackets
+    if (detailsString.toLowerCase().includes('salida manual a:')) {
+        return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: detailsString };
+    }
+
+    // Otherwise, assume it's just a raw location (like during Ingresos)
+    return { location: detailsString, detail: '-' };
+};
+
 export default function ProductDetails() {
     const { code } = useParams();
     const navigate = useNavigate();
@@ -43,6 +61,7 @@ export default function ProductDetails() {
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
     const [requestName, setRequestName] = useState('');
+    const [receptorName, setReceptorName] = useState('');
     const [requestQty, setRequestQty] = useState(1);
 
     // New Sort/Filter State
@@ -240,14 +259,20 @@ export default function ProductDetails() {
 
     const handleCreateRequest = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (!baseProduct) return;
         if (requestQty < 1 || requestQty > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
             return;
         }
+
         const nameParts = requestName.trim().split(/\s+/);
         if (nameParts.length < 2) {
             showError('RECHAZADO: Debes ingresar tu nombre Y tu apellido para solicitar.');
+            return;
+        }
+
+        const receptorParts = receptorName.trim().split(/\s+/);
+        if (receptorParts.length < 2) {
+            showError('RECHAZADO: Debes ingresar el nombre Y apellido de quién recibe.');
             return;
         }
 
@@ -258,6 +283,7 @@ export default function ProductDetails() {
                 productName: baseProduct.name,
                 quantity: requestQty,
                 requestedBy: requestName.trim(),
+                receptorName: receptorName.trim(),
                 requesterEmail: currentUser?.email || ''
             });
             setRequestSuccess('Solicitud enviada a bodega con éxito.');
@@ -266,6 +292,7 @@ export default function ProductDetails() {
                 setRequestSuccess('');
                 setRequestQty(1);
                 setRequestName('');
+                setReceptorName('');
             }, 2500);
         } catch (err) {
             console.error(err);
@@ -341,15 +368,29 @@ export default function ProductDetails() {
             {/* Datos del Producto */}
             <div className="relative z-10 bg-white rounded-3xl shadow-sm p-6 sm:p-8 border border-gray-100 -mt-20">
                 <div className="flex flex-col md:flex-row gap-8 items-start justify-between">
-                    <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                            <h1 className="text-3xl font-black text-gray-900 tracking-tight">{baseProduct.name}</h1>
-                            <span className="bg-gray-100 text-gray-600 px-3 py-1 rounded-full text-sm font-mono border border-gray-200">{baseProduct.code}</span>
+                    <div className="flex-1 flex flex-col justify-between">
+                        <div className="mb-8">
+                            <span className="inline-block px-3 py-1 bg-red-50 text-coca-red rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-red-100 shadow-sm">
+                                Código del Producto
+                            </span>
+                            <h1 className="text-5xl md:text-6xl font-black text-coca-red tracking-tight break-all uppercase leading-none">
+                                {baseProduct.code}
+                            </h1>
                         </div>
-                        <p className="text-gray-600 text-lg leading-relaxed">{baseProduct.description}</p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-gray-50/50 p-5 rounded-2xl border border-gray-100/50 w-full">
+                            <div>
+                                <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Descripción</span>
+                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tight">{baseProduct.name}</h2>
+                            </div>
+                            <div>
+                                <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Más Detalles</span>
+                                <p className="text-gray-600 text-sm leading-relaxed uppercase font-medium">{baseProduct.description}</p>
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="flex flex-col gap-3 min-w-[200px] w-full md:w-auto">
+                    <div className="flex flex-col gap-3 min-w-[280px] w-full md:w-auto mt-6 md:mt-0">
                         <div className="bg-red-50 border border-red-100/50 p-6 rounded-2xl text-center shadow-inner">
                             <p className="text-sm text-red-600 font-bold uppercase tracking-widest mb-1">Stock Disponible</p>
                             <p className="text-5xl font-black text-coca-red drop-shadow-sm">{totalStock}</p>
@@ -430,7 +471,7 @@ export default function ProductDetails() {
                         <div className="flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
                             <input
                                 type="text"
-                                placeholder="Filtrar por vendedor/receptor..."
+                                placeholder="Filtrar por receptor..."
                                 value={filterReceptor}
                                 onChange={(e) => setFilterReceptor(e.target.value)}
                                 className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-coca-red outline-none w-full sm:w-64 shadow-sm"
@@ -448,10 +489,11 @@ export default function ProductDetails() {
                             <thead className="bg-white">
                                 <tr>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Fecha</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Monto (Stock)</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación / Detalle</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario (Registrador)</th>
-                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Auditoría</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ubicación</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Detalle</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Usuario</th>
+                                    <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Acciones</th>
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-100">
@@ -465,8 +507,11 @@ export default function ProductDetails() {
                                                 {p.stock > 0 ? `+${p.stock}` : p.stock}
                                             </div>
                                         </td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
+                                            {extractLocationAndDetail(p.details).location}
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {p.details || <span className="text-gray-300 italic">Sin ubicación</span>}
+                                            {extractLocationAndDetail(p.details).detail}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                             <div className="flex flex-col gap-1.5">
@@ -574,7 +619,7 @@ export default function ProductDetails() {
                         ) : (
                             <form onSubmit={handleCreateRequest} className="space-y-5">
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Tu Nombre y Apellido</label>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre y Apellido de quien solicita</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
                                         <div className="pl-3 py-3 flex items-center justify-center text-gray-400">
                                             <User size={18} />
@@ -590,10 +635,26 @@ export default function ProductDetails() {
                                     </div>
                                 </div>
                                 <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre y Apellido de quien recibe</label>
+                                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
+                                        <div className="pl-3 py-3 flex items-center justify-center text-gray-400">
+                                            <User size={18} />
+                                        </div>
+                                        <input
+                                            type="text"
+                                            required
+                                            placeholder="Ej. María Gómez"
+                                            className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full"
+                                            value={receptorName}
+                                            onChange={(e) => setReceptorName(e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                                <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">Cantidad a Retirar</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 p-1">
                                         <button type="button" onClick={() => setRequestQty(Math.max(1, requestQty - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
-                                        <input type="number" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
+                                        <input type="number" inputMode="numeric" pattern="[0-9]*" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
                                         <button type="button" onClick={() => setRequestQty(Math.min(totalStock, requestQty + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
                                     </div>
                                     <div className="flex justify-between mt-2 text-xs font-semibold px-1">

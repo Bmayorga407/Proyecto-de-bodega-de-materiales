@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Plus, Save, Loader2, CheckCircle2, Eye, AlertTriangle, X, ArrowUpRight, Check, PackageCheck, Clock, Archive } from 'lucide-react';
+import { Camera, Plus, Save, Loader2, CheckCircle2, Eye, AlertTriangle, X, ArrowUpRight, Check, PackageCheck, Clock, Archive, User, ArrowUpDown } from 'lucide-react';
 import { OrderRequest, Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
@@ -25,9 +25,19 @@ export default function InventoryAdmin() {
     const [requests, setRequests] = useState<OrderRequest[]>([]);
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [showArchivedAdmin, setShowArchivedAdmin] = useState(false);
+    const [sortNewestFirst, setSortNewestFirst] = useState(true);
 
-    const activeProducts = useMemo(() => products.filter(p => p.stock > 0), [products]);
-    const archivedProducts = useMemo(() => products.filter(p => p.stock <= 0), [products]);
+    const activeProducts = useMemo(() => {
+        let list = products.filter(p => p.stock > 0);
+        if (sortNewestFirst) list = [...list].reverse();
+        return list;
+    }, [products, sortNewestFirst]);
+
+    const archivedProducts = useMemo(() => {
+        let list = products.filter(p => p.stock <= 0);
+        if (sortNewestFirst) list = [...list].reverse();
+        return list;
+    }, [products, sortNewestFirst]);
 
     // Form state
     const [formData, setFormData] = useState<Partial<Product>>({
@@ -438,18 +448,18 @@ export default function InventoryAdmin() {
                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                                         <div>
                                             <label className="block text-sm font-medium text-gray-700 mb-1">Código Identificador {formMode === 'salida' && '(Obligatorio)'}</label>
-                                            <input required type="text" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none"
+                                            <input required type="text" inputMode="numeric" pattern="[0-9]*" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none"
                                                 value={formData.code} onChange={handleCodeChange} placeholder="Escribe el código para auto-rellenar..." />
                                         </div>
                                         <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Nombre del producto {formMode === 'salida' && '(Automático)'}</label>
+                                            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción {formMode === 'salida' && '(Automático)'}</label>
                                             <input required type="text" className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`}
                                                 value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} disabled={formMode === 'salida'} />
                                         </div>
                                     </div>
 
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Descripción más detallada {formMode === 'salida' && '(Automático)'}</label>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Más detalles {formMode === 'salida' && '(Automático)'}</label>
                                         <textarea className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`} rows={3}
                                             value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} disabled={formMode === 'salida'} />
                                     </div>
@@ -457,7 +467,7 @@ export default function InventoryAdmin() {
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-5">
                                         <div className="col-span-1">
                                             <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">{formMode === 'ingreso' ? 'Stock a Ingresar' : 'Cantidad a Retirar'}</label>
-                                            <input required type="number" min="1" className="w-full px-3 md:px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none text-sm md:text-base"
+                                            <input required type="number" inputMode="numeric" pattern="[0-9]*" min="1" className="w-full px-3 md:px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none text-sm md:text-base"
                                                 value={formData.stock || ''} onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} />
                                         </div>
                                         <div className="col-span-1">
@@ -582,24 +592,52 @@ export default function InventoryAdmin() {
                 ) : (
                     <div className="space-y-4">
                         {/* Tabs */}
-                        <div className="flex gap-2 sm:gap-6 border-b border-gray-200">
-                            <button
-                                onClick={() => setActiveTab('inventario')}
-                                className={`pb-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'inventario' ? 'border-coca-red text-coca-red' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Inventario Principal
-                            </button>
-                            <button
-                                onClick={() => setActiveTab('solicitudes')}
-                                className={`pb-3 font-semibold text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'solicitudes' ? 'border-coca-red text-coca-red' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
-                            >
-                                Solicitudes Entrantes
-                                {requests.filter(r => r.status === 'PENDIENTE').length > 0 && (
-                                    <span className="bg-red-100 text-coca-red py-0.5 px-2 rounded-full text-xs">
-                                        {requests.filter(r => r.status === 'PENDIENTE').length}
+                        <div className="flex justify-between items-end border-b border-gray-200">
+                            <div className="flex gap-2 sm:gap-6 pt-1">
+                                <button
+                                    onClick={() => setActiveTab('inventario')}
+                                    className={`pb-3 font-semibold text-sm transition-colors border-b-2 ${activeTab === 'inventario' ? 'border-coca-red text-coca-red' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    Inventario Principal
+                                </button>
+                                <button
+                                    onClick={() => setActiveTab('solicitudes')}
+                                    className={`pb-3 font-semibold text-sm transition-colors border-b-2 flex items-center gap-2 ${activeTab === 'solicitudes' ? 'border-coca-red text-coca-red' : 'border-transparent text-gray-500 hover:text-gray-700'}`}
+                                >
+                                    Solicitudes Entrantes
+                                    <div className="flex items-center gap-1.5 ml-1">
+                                        {requests.filter(r => r.status === 'PENDIENTE').length > 0 && (
+                                            <div className="relative flex items-center justify-center" title="Pendientes">
+                                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-coca-red opacity-40"></span>
+                                                <span className="relative inline-flex items-center justify-center rounded-full text-[11px] font-black text-white bg-coca-red px-2 py-0.5 shadow-sm min-w-[22px] border border-red-700">
+                                                    {requests.filter(r => r.status === 'PENDIENTE').length}
+                                                </span>
+                                            </div>
+                                        )}
+                                        {requests.filter(r => r.status === 'APROBADA').length > 0 && (
+                                            <div className="relative flex items-center justify-center" title="Aprobadas (Por entregar)">
+                                                <span className="animate-pulse absolute inline-flex h-full w-full rounded-full bg-blue-500 opacity-40"></span>
+                                                <span className="relative inline-flex items-center justify-center rounded-full text-[11px] font-black text-white bg-blue-600 px-2 py-0.5 shadow-sm min-w-[22px] border border-blue-700">
+                                                    {requests.filter(r => r.status === 'APROBADA').length}
+                                                </span>
+                                            </div>
+                                        )}
+                                    </div>
+                                </button>
+                            </div>
+
+                            {activeTab === 'inventario' && (
+                                <button
+                                    onClick={() => setSortNewestFirst(!sortNewestFirst)}
+                                    className={`flex items-center justify-center gap-2 p-2 px-3 mb-2 rounded-xl border transition-colors shadow-sm ${sortNewestFirst ? 'bg-red-50 text-coca-red border-red-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                    title={sortNewestFirst ? "Orden: Más recientes primero" : "Orden: Más antiguos primero"}
+                                >
+                                    <ArrowUpDown size={18} />
+                                    <span className="text-sm font-semibold hidden sm:inline">
+                                        {sortNewestFirst ? 'Más Recientes' : 'Más Antiguos'}
                                     </span>
-                                )}
-                            </button>
+                                </button>
+                            )}
                         </div>
 
                         <div className="bg-white rounded-2xl shadow border border-gray-100 overflow-hidden">
@@ -705,8 +743,17 @@ export default function InventoryAdmin() {
                                                         </div>
                                                     </td>
                                                     <td className="px-6 py-4 text-sm text-gray-500">
-                                                        <div className="flex flex-col">
-                                                            <span>{req.requestedBy.split('@')[0]}</span>
+                                                        <div className="flex flex-col gap-1">
+                                                            <div className="flex items-center gap-1.5" title="Solicita">
+                                                                <User size={14} className="text-gray-400" />
+                                                                <span className="font-semibold">{req.requestedBy.split('@')[0]}</span>
+                                                            </div>
+                                                            {req.receptorName && req.receptorName.trim() !== '' && (
+                                                                <div className="flex items-center gap-1.5" title="Recibe">
+                                                                    <ArrowUpRight size={14} className="text-gray-400" />
+                                                                    <span className="text-gray-600 font-medium">{req.receptorName}</span>
+                                                                </div>
+                                                            )}
                                                             <span className="text-xs text-gray-400">{new Date(req.dateRequested).toLocaleDateString()}</span>
                                                         </div>
                                                     </td>

@@ -2,8 +2,8 @@
 import axios from 'axios';
 import { Product } from '../types';
 
-// Use exact localhost port in dev, and relative Vercel route in production
-const API_URL = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api';
+// Use the current machine's IP/hostname in dev so mobile testing works, and relative Vercel route in production
+const API_URL = import.meta.env.DEV ? `http://${window.location.hostname}:3001/api` : '/api';
 
 export const setInventoryUserEmail = (email: string | null) => {
     if (email) {

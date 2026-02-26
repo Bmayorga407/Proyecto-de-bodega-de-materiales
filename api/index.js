@@ -254,15 +254,15 @@ app.put('/api/products/:id', async (req, res) => {
 
 app.post('/api/solicitudes', async (req, res) => {
     try {
-        const { productCode, productName, quantity, requestedBy, status = 'PENDIENTE', dateRequested = new Date().toISOString(), processedBy = '', requesterEmail = '' } = req.body;
+        const { productCode, productName, quantity, requestedBy, receptorName = '', status = 'PENDIENTE', dateRequested = new Date().toISOString(), processedBy = '', requesterEmail = '' } = req.body;
         const resource = {
             values: [
-                [Date.now().toString(), productCode, productName, quantity, requestedBy, status, dateRequested, processedBy, requesterEmail]
+                [Date.now().toString(), productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail]
             ],
         };
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).requestsTab}!A:I`,
+            range: `${getSheetNames(req).requestsTab}!A:J`,
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
@@ -277,7 +277,7 @@ app.get('/api/solicitudes', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).requestsTab}!A:I`,
+            range: `${getSheetNames(req).requestsTab}!A:J`,
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return res.status(200).json([]);
@@ -288,10 +288,11 @@ app.get('/api/solicitudes', async (req, res) => {
             productName: row[2] || '',
             quantity: Number(row[3]) || 0,
             requestedBy: row[4] || '',
-            status: row[5] || 'PENDIENTE',
-            dateRequested: row[6] || '',
-            processedBy: row[7] || '',
-            requesterEmail: row[8] || ''
+            receptorName: row[5] || '',
+            status: row[6] || 'PENDIENTE',
+            dateRequested: row[7] || '',
+            processedBy: row[8] || '',
+            requesterEmail: row[9] || ''
         })).filter(r => r.id && r.id.trim() !== '');
         res.status(200).json(requests);
     } catch (error) {
@@ -303,12 +304,12 @@ app.get('/api/solicitudes', async (req, res) => {
 app.put('/api/solicitudes/:id', async (req, res) => {
     try {
         const requestId = req.params.id;
-        const { productCode, productName, quantity, requestedBy, status, dateRequested, processedBy = '', requesterEmail = '' } = req.body;
+        const { productCode, productName, quantity, requestedBy, receptorName = '', status, dateRequested, processedBy = '', requesterEmail = '' } = req.body;
 
         const { requestsTab } = getSheetNames(req);
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${requestsTab}!A:I`,
+            range: `${requestsTab}!A:J`,
         });
         const rows = getRes.data.values;
         if (!rows) return res.status(404).json({ error: 'No data' });
@@ -322,10 +323,10 @@ app.put('/api/solicitudes/:id', async (req, res) => {
         }
         if (rowIndex === -1) return res.status(404).json({ error: 'Request not found' });
 
-        const updateRange = `${requestsTab}!A${rowIndex}:I${rowIndex}`;
+        const updateRange = `${requestsTab}!A${rowIndex}:J${rowIndex}`;
         const resource = {
             values: [
-                [requestId, productCode, productName, quantity, requestedBy, status, dateRequested, processedBy, requesterEmail]
+                [requestId, productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail]
             ],
         };
         await sheets.spreadsheets.values.update({

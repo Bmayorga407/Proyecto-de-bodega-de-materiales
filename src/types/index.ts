@@ -26,7 +26,8 @@ export interface OrderRequest {
     productCode: string;
     productName: string;
     quantity: number;
-    requestedBy: string; // The human name they typed
+    requestedBy: string; // The human name they typed (who requested)
+    receptorName?: string; // The human name they typed (who receives/uses)
     status: RequestStatus;
     dateRequested: string;
     processedBy?: string; // Email of the Bodega user who approved/rejected/delivered

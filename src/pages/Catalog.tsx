@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Package, Loader2, History, X, Clock, CheckCircle2, XCircle, User } from 'lucide-react';
+import { Search, Package, Loader2, History, X, Clock, CheckCircle2, XCircle, User, ArrowUpDown } from 'lucide-react';
 import { Product, OrderRequest } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
@@ -29,6 +29,7 @@ export default function Catalog() {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
+    const [sortNewestFirst, setSortNewestFirst] = useState(true);
     const [products, setProducts] = useState<Product[]>([]);
     const [myRequests, setMyRequests] = useState<OrderRequest[]>([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -141,11 +142,15 @@ export default function Catalog() {
     // Real-time search filtering
     const filteredProducts = useMemo(() => {
         const term = searchTerm.toLowerCase();
-        return products.filter(p =>
+        let filtered = products.filter(p =>
             p.name.toLowerCase().includes(term) ||
             p.code.toLowerCase().includes(term)
         );
-    }, [searchTerm, products]);
+        if (sortNewestFirst) {
+            filtered = [...filtered].reverse();
+        }
+        return filtered;
+    }, [searchTerm, products, sortNewestFirst]);
 
     const activeProducts = useMemo(() => filteredProducts.filter(p => p.stock > 0), [filteredProducts]);
     const archivedProducts = useMemo(() => filteredProducts.filter(p => p.stock <= 0), [filteredProducts]);
@@ -197,8 +202,13 @@ export default function Catalog() {
                                                     Cantidad solicitada: <span className="text-black font-bold">{req.quantity}</span> UN
                                                 </div>
                                                 <div className="text-sm font-medium text-gray-400 mt-0.5">
-                                                    Solicitado a nombre de: <span className="text-gray-600 font-semibold">{req.requestedBy}</span>
+                                                    Solicitado por: <span className="text-gray-600 font-semibold">{req.requestedBy}</span>
                                                 </div>
+                                                {req.receptorName && req.receptorName.trim() !== '' && (
+                                                    <div className="text-sm font-medium text-gray-400 mt-0.5">
+                                                        Recibe: <span className="text-gray-600 font-semibold">{req.receptorName}</span>
+                                                    </div>
+                                                )}
                                                 {req.status !== 'PENDIENTE' && req.processedBy && (
                                                     <div className="mt-3 flex items-center gap-1.5 text-xs text-gray-500 bg-gray-50 px-2.5 py-1.5 rounded-lg border border-gray-100 inline-flex">
                                                         <User size={14} className="text-gray-400" />
@@ -243,6 +253,8 @@ export default function Catalog() {
                                 <button type="button" onClick={() => setModifyQuantity(Math.max(1, modifyQuantity - 1))} className="w-12 h-12 rounded-xl flex items-center justify-center border bg-white text-coca-red hover:bg-red-50 font-bold hover:scale-105 active:scale-95 transition-all shadow-sm">-</button>
                                 <input
                                     type="number"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
                                     min="1"
                                     value={modifyQuantity}
                                     onChange={(e) => setModifyQuantity(Math.max(1, parseInt(e.target.value) || 1))}
@@ -293,6 +305,21 @@ export default function Catalog() {
                     >
                         <History size={18} className="text-coca-red" />
                         <span className="hidden sm:inline">Mis Solicitudes</span>
+                        {myRequests.filter(r => r.status === 'PENDIENTE').length > 0 && (
+                            <span className="bg-red-100 text-coca-red py-0.5 px-2 rounded-full text-xs font-bold">
+                                {myRequests.filter(r => r.status === 'PENDIENTE').length}
+                            </span>
+                        )}
+                    </button>
+                    <button
+                        onClick={() => setSortNewestFirst(!sortNewestFirst)}
+                        className={`flex items-center justify-center gap-2 p-2 px-3 rounded-xl border transition-colors shadow-sm ${sortNewestFirst ? 'bg-red-50 text-coca-red border-red-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                        title={sortNewestFirst ? "Orden: Más recientes primero" : "Orden: Más antiguos primero"}
+                    >
+                        <ArrowUpDown size={18} />
+                        <span className="text-sm font-semibold hidden sm:inline">
+                            {sortNewestFirst ? 'Más Recientes' : 'Más Antiguos'}
+                        </span>
                     </button>
                     <div className="relative w-full md:w-80">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
