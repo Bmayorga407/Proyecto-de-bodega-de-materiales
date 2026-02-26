@@ -1,12 +1,14 @@
+import { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Package, UserCircle } from 'lucide-react';
+import { LogOut, Package, UserCircle, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const Layout = () => {
     const navigate = useNavigate();
     const { logout, currentUser, role, isTestUser } = useAuth();
+    const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-    const handleLogout = async () => {
+    const handleConfirmLogout = async () => {
         try {
             await logout();
             navigate('/login');
@@ -39,7 +41,7 @@ export const Layout = () => {
                                 </div>
                             )}
                             <button
-                                onClick={handleLogout}
+                                onClick={() => setIsLoggingOut(true)}
                                 className="p-2 rounded-full hover:bg-red-700 transition-colors flex items-center justify-center bg-transparent"
                                 title="Cerrar sesión"
                             >
@@ -53,6 +55,39 @@ export const Layout = () => {
             <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <Outlet />
             </main>
+
+            {/* Modal de Confirmación de Cierre de Sesión */}
+            {isLoggingOut && (
+                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+                    <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+                        <div className="p-6">
+                            <div className="flex items-center gap-4 text-red-600 mb-4">
+                                <div className="p-3 bg-red-100 rounded-full">
+                                    <LogOut size={28} />
+                                </div>
+                                <h3 className="text-xl font-bold text-gray-900">¿Cerrar sesión?</h3>
+                            </div>
+                            <p className="text-gray-600 text-sm mb-6 leading-relaxed">
+                                Estás a punto de salir de tu cuenta de Bodega. Tendrás que volver a ingresar tus credenciales para continuar operando.
+                            </p>
+                            <div className="flex gap-3">
+                                <button
+                                    onClick={() => setIsLoggingOut(false)}
+                                    className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-semibold transition-colors flex justify-center items-center gap-2"
+                                >
+                                    <X size={18} /> Cancelar
+                                </button>
+                                <button
+                                    onClick={handleConfirmLogout}
+                                    className="flex-1 px-4 py-2.5 bg-coca-red hover:bg-red-700 text-white rounded-lg font-semibold shadow-md shadow-red-500/30 transition-all active:scale-[0.98] flex justify-center items-center gap-2"
+                                >
+                                    Salir Ahora
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
