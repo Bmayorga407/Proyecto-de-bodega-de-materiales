@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, Package, UserCircle, X } from 'lucide-react';
+import { LogOut, UserCircle, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
 export const Layout = () => {
@@ -22,10 +22,21 @@ export const Layout = () => {
             <header className="bg-coca-red text-white shadow-md sticky top-0 z-50">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-between items-center h-16">
-                        <div className="flex items-center gap-2">
-                            <Package size={24} />
-                            <span className="font-bold text-xl tracking-wide hidden sm:inline">Bodega <span className="text-black ml-1">Coca-Cola Concepción</span></span>
-                            <span className="font-bold text-xl tracking-wide sm:hidden">Bodega</span>
+                        <div
+                            className="flex items-center gap-2 cursor-pointer hover:opacity-80 transition-opacity select-none group"
+                            onClick={() => navigate('/')}
+                            title="Volver a Inicio"
+                        >
+                            <img
+                                src="https://upload.wikimedia.org/wikipedia/commons/c/ce/Coca-Cola_logo.svg"
+                                alt="Coca-Cola Logo"
+                                className="h-6 sm:h-8 object-contain transition-transform group-active:scale-95"
+                                style={{ filter: 'brightness(0) invert(1)' }}
+                            />
+                            <div className="ml-2 border-l border-white/30 pl-3 flex flex-col justify-center">
+                                <span className="font-black text-white text-xs sm:text-sm leading-tight tracking-wider uppercase">Bodega</span>
+                                <span className="text-[9px] sm:text-[10px] text-white/80 uppercase font-bold tracking-widest leading-none hidden xs:block">Concepción</span>
+                            </div>
                             {isTestUser && (
                                 <span className="ml-2 px-2 py-0.5 mt-0.5 bg-yellow-400 text-black text-[10px] font-black tracking-widest uppercase rounded rounded-tl-none rounded-br-none shadow animate-pulse border-white border">
                                     Testing
