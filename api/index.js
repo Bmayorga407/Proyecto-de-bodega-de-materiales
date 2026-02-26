@@ -59,8 +59,8 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 // TEST ENVIRONMENT UTILS
 // ----------------------------------------------------
 const TEST_EMAILS = [
-    'brian.mayorga@coca-cola.local', // Test Bodega
-    'ventas1@coca-cola.local'        // Test Ventas
+    // 'brian.mayorga@coca-cola.local', // Test Bodega
+    // 'ventas1@coca-cola.local'        // Test Ventas
 ];
 
 function getSheetNames(req) {
