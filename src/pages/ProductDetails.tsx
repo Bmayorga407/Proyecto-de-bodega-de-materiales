@@ -369,17 +369,20 @@ export default function ProductDetails() {
             <div className="relative z-10 bg-white rounded-3xl shadow-sm p-6 sm:p-8 border border-gray-100 -mt-20">
                 <div className="flex flex-col md:flex-row gap-8 items-start justify-between">
                     <div className="flex-1 flex flex-col justify-between">
-                        <div className="mb-8">
-                            <span className="inline-block px-3 py-1 bg-red-50 text-coca-red rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-red-100 shadow-sm">
-                                Código del Producto
-                            </span>
-                            <h1 className="text-5xl md:text-6xl font-black text-coca-red tracking-tight break-all uppercase leading-none">
-                                {baseProduct.code}
-                            </h1>
-                            {role === 'BODEGA' && baseProduct.channel && (
-                                <div className="mt-4 flex items-center gap-2">
-                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-widest border border-gray-200 px-3 py-1 rounded-full bg-white shadow-sm">
-                                        Canal: <span className="text-coca-red ml-1">{baseProduct.channel}</span>
+                        <div className="mb-8 flex items-end gap-3 flex-wrap">
+                            <div>
+                                <span className="inline-block px-3 py-1 bg-red-50 text-coca-red rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-red-100 shadow-sm">
+                                    Código del Producto
+                                </span>
+                                <h1 className="text-5xl md:text-6xl font-black text-coca-red tracking-tight break-all uppercase leading-none">
+                                    {baseProduct.code}
+                                </h1>
+                            </div>
+
+                            {baseProduct.channel && (
+                                <div className="transition-all animate-in fade-in slide-in-from-left-4 duration-500 delay-200">
+                                    <span className="inline-block px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-gray-200 shadow-sm">
+                                        {baseProduct.channel}
                                     </span>
                                 </div>
                             )}
@@ -460,7 +463,7 @@ export default function ProductDetails() {
                                 <select className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm appearance-none bg-white"
                                     value={formData.channel || ''} onChange={e => setFormData({ ...formData, channel: e.target.value })}>
                                     <option value="" disabled>Sin canal</option>
-                                    <option value="Venta hogar">Venta hogar</option>
+                                    <option value="Venta Hogar">Venta Hogar</option>
                                     <option value="Publicidad">Publicidad</option>
                                     <option value="Tradicional">Tradicional</option>
                                     <option value="Moderno">Moderno</option>

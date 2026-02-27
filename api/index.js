@@ -89,9 +89,10 @@ app.post('/api/products', async (req, res) => {
     try {
         const { name, code, description, stock, details, imageUrl = '', entryDate = '', registeredBy = '', channel = '' } = req.body;
 
+        const newId = Date.now().toString();
         const resource = {
             values: [
-                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate, registeredBy, '', channel]
+                [newId, code, name, description, stock, imageUrl, details, entryDate, registeredBy, '', channel]
             ],
         };
 
@@ -105,6 +106,7 @@ app.post('/api/products', async (req, res) => {
         res.status(200).json({
             success: true,
             message: 'Product added successfully',
+            id: newId,
             imageUrl
         });
     } catch (error) {

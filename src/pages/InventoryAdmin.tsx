@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Plus, Save, Loader2, CheckCircle2, Eye, AlertTriangle, X, ArrowUpRight, Check, PackageCheck, Clock, Archive, User, ArrowUpDown } from 'lucide-react';
+import { Camera, Plus, Save, Loader2, CheckCircle2, Eye, AlertTriangle, X, ArrowUpRight, Check, PackageCheck, Clock, Archive, User, ArrowUpDown, RotateCcw, Filter, ChevronDown } from 'lucide-react';
 import { OrderRequest, Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
@@ -10,10 +10,23 @@ const getLocalDateString = () => {
     return new Date(Date.now() - tzoffset).toISOString().split('T')[0];
 };
 
+const ALL_CHANNELS = ['Tradicional', 'Moderno', 'Venta Hogar', 'Publicidad'];
+
 export default function InventoryAdmin() {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
     const [formMode, setFormMode] = useState<'none' | 'ingreso' | 'salida'>('none');
+
+    // Auto-focus code input when opening form
+    useEffect(() => {
+        if (formMode !== 'none') {
+            setTimeout(() => {
+                const input = document.getElementById('main-code-input');
+                if (input) input.focus();
+            }, 350); // duration of the slide-in animation
+        }
+    }, [formMode]);
+
     const [activeTab, setActiveTab] = useState<'inventario' | 'solicitudes'>('inventario');
     const [isSaving, setIsSaving] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -27,18 +40,29 @@ export default function InventoryAdmin() {
     const [showArchivedAdmin, setShowArchivedAdmin] = useState(false);
     const [sortNewestFirst, setSortNewestFirst] = useState(true);
     const [channelWarning, setChannelWarning] = useState('');
+    const [lastActionIds, setLastActionIds] = useState<string[]>([]);
+    const [isUndoing, setIsUndoing] = useState(false);
+    const [selectedChannels, setSelectedChannels] = useState<string[]>(ALL_CHANNELS);
+    const [showChannelFilter, setShowChannelFilter] = useState(false);
+
+    const filteredProducts = useMemo(() => {
+        // Si todos están seleccionados, mostrar todo (incluso sin canal)
+        if (selectedChannels.length === ALL_CHANNELS.length) return products;
+        // Si hay un filtro activo, solo mostrar coincidencias exactas y ocultar los vacíos
+        return products.filter(p => p.channel && selectedChannels.includes(p.channel));
+    }, [products, selectedChannels]);
 
     const activeProducts = useMemo(() => {
-        let list = products.filter(p => p.stock > 0);
+        let list = filteredProducts.filter(p => p.stock > 0);
         if (sortNewestFirst) list = [...list].reverse();
         return list;
-    }, [products, sortNewestFirst]);
+    }, [filteredProducts, sortNewestFirst]);
 
     const archivedProducts = useMemo(() => {
-        let list = products.filter(p => p.stock <= 0);
+        let list = filteredProducts.filter(p => p.stock <= 0);
         if (sortNewestFirst) list = [...list].reverse();
         return list;
-    }, [products, sortNewestFirst]);
+    }, [filteredProducts, sortNewestFirst]);
 
     // Form state
     const [formData, setFormData] = useState<Partial<Product>>({
@@ -65,14 +89,16 @@ export default function InventoryAdmin() {
             console.log('API responded', { productsData, requestsData });
             setAllProducts(productsData);
 
-            // Group products by code
+            // Group products by code + channel
             const aggregatedMap = new Map<string, Product>();
             productsData.forEach((p) => {
                 if (!p.code) {
                     console.warn('Product missing code:', p);
                     return;
                 }
-                const codeKey = p.code.trim().toLowerCase();
+                const channel = (p.channel || '').trim();
+                const codeKey = `${p.code.trim().toLowerCase()}|${channel.toLowerCase()}`;
+
                 if (!codeKey) return;
                 if (aggregatedMap.has(codeKey)) {
                     const existing = aggregatedMap.get(codeKey)!;
@@ -223,31 +249,57 @@ export default function InventoryAdmin() {
 
     const handleCodeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newCode = e.target.value;
-        const existingProduct = products.find(p => p.code.toLowerCase() === newCode.toLowerCase());
+        const matched = products.find(p => p.code.toLowerCase() === newCode.toLowerCase());
 
-        if (existingProduct) {
+        if (matched) {
+            const pastEntries = allProducts.filter(p => p.code.toLowerCase() === newCode.toLowerCase() && p.stock > 0 && p.details);
+            const lastLocation = pastEntries.length > 0 ? [...pastEntries].sort((a, b) => new Date(a.entryDate || 0).getTime() - new Date(b.entryDate || 0).getTime()).pop()?.details : '';
+
             setFormData(prev => ({
                 ...prev,
                 code: newCode,
-                name: prev.name || existingProduct.name, // Auto-completar solo si está vacío o pisar? Pisaremos para mayor rapidez.
-                description: prev.description || existingProduct.description,
+                name: matched.name,
+                description: matched.description,
+                channel: matched.channel || prev.channel,
+                imageUrl: matched.imageUrl || prev.imageUrl,
+                details: formMode === 'ingreso' ? (lastLocation || prev.details) : prev.details
             }));
-
-            // Si el nombre ya era igual se mantiene, si estaba vacío lo llena. 
-            // Si el usuario borra todo y empieza a escribir, al poner el código se llenará todo.
-            // Para forzar la sobreescritura (más útil): 
-            setFormData(prev => ({
-                ...prev,
-                code: newCode,
-                name: existingProduct.name,
-                description: existingProduct.description,
-                channel: existingProduct.channel || prev.channel,
-                imageUrl: existingProduct.imageUrl || prev.imageUrl
-            }));
-            setChannelWarning('');
         } else {
-            setFormData(prev => ({ ...prev, code: newCode }));
-            setChannelWarning('');
+            setFormData(prev => ({
+                ...prev,
+                code: newCode,
+                name: '',
+                description: '',
+                channel: '',
+                imageUrl: ''
+            }));
+        }
+        setChannelWarning('');
+    };
+
+    const confirmCode = () => {
+        // En focos al presionar ENTER, saltamos al stock si el código es válido
+        const matched = products.some(p => p.code.toLowerCase() === formData.code?.toLowerCase());
+        if (matched) {
+            const stockInput = document.getElementById('fast-entry-stock');
+            if (stockInput) stockInput.focus();
+        }
+    };
+
+    const handleUndo = async () => {
+        if (lastActionIds.length === 0 || isUndoing) return;
+        setIsUndoing(true);
+        try {
+            await Promise.all(lastActionIds.map(id => inventoryService.deleteProduct(id)));
+            setSuccessMsg('Registro deshecho correctamente.');
+            setLastActionIds([]);
+            loadData();
+        } catch (error) {
+            console.error('Error undoing:', error);
+            setErrorMsg('No se pudo deshacer el registro.');
+        } finally {
+            setIsUndoing(false);
+            setTimeout(() => setSuccessMsg(''), 3000);
         }
     };
 
@@ -323,37 +375,46 @@ export default function InventoryAdmin() {
         }
 
         setIsSaving(true);
+        const createdIds: string[] = [];
         try {
             for (const item of itemsToSave) {
-                await inventoryService.addProduct({
+                const res = await inventoryService.addProduct({
                     ...item,
                     registeredBy: currentUser?.email || 'Bodega Desconocida'
                 } as Product, formMode === 'ingreso' ? (imageFile || undefined) : undefined);
+
+                if (res && res.id) createdIds.push(res.id);
+
                 // Retraso de seguridad para que Sheets pueda insertar la fila correctamente sin colisiones
                 if (itemsToSave.length > 1) await new Promise(res => setTimeout(res, 500));
             }
-
+            setLastActionIds(createdIds);
             setSuccessMsg(`Registro de ${formMode === 'ingreso' ? 'ingreso' : 'salida'} para ${dataToSave.code} completado.`);
 
+            // Clear form IMMEDIATELY to prevent confusion and double entry
+            setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: getLocalDateString() });
+            setChannelWarning('');
+            setImageFile(null);
+            setManualLocations([]);
+            loadData(); // refresh the table
+
+            // Keep success message for 8s (for Undo), then hide
             setTimeout(() => {
                 setSuccessMsg('');
-                setFormMode('none');
-                setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0] });
-                setChannelWarning('');
-                setImageFile(null);
-                setManualLocations([]);
-                loadData(); // refresh the table
-            }, 2500);
+                setLastActionIds([]);
+            }, 10000); // 10 seconds total visibility
         } catch (err) {
             console.error(err);
             showError("Hubo un error al guardar el producto. Revisa la consola.");
         } finally {
             setIsSaving(false);
+            setFormMode('none');
         }
     };
 
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (isSaving || !!successMsg) return; // STRICT BLOCK for double entries
 
         // Validation: Code Description Mismatch
         if (formData.code) {
@@ -376,9 +437,29 @@ export default function InventoryAdmin() {
         <div className="min-h-screen bg-gray-50 pb-20 md:pb-8">
             {/* Success Notification */}
             {successMsg && (
-                <div className="fixed top-4 right-4 bg-green-50 text-green-800 border-l-4 border-green-500 p-4 rounded shadow-lg z-50 flex items-center gap-3 animate-in slide-in-from-top-2">
-                    <CheckCircle2 size={20} className="text-green-500" />
-                    <p className="font-medium text-sm">{successMsg}</p>
+                <div className="fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-md bg-green-600 text-white p-4 rounded-2xl shadow-2xl z-50 animate-in slide-in-from-top-8 duration-500 flex flex-col items-center gap-3">
+                    <div className="flex items-center gap-3">
+                        <div className="bg-white/20 p-1.5 rounded-full">
+                            <Check size={24} className="text-white" />
+                        </div>
+                        <p className="font-bold text-sm sm:text-base leading-tight">{successMsg}</p>
+                    </div>
+                    {lastActionIds.length > 0 && !successMsg.includes('deshecho') && (
+                        <div className="w-full pt-1 animate-in fade-in zoom-in-95 duration-700 delay-300">
+                            <button
+                                onClick={(e) => { e.preventDefault(); handleUndo(); }}
+                                disabled={isUndoing}
+                                className="w-full flex items-center justify-center gap-2 bg-white text-green-700 py-3 rounded-xl font-black text-xs uppercase tracking-[0.2em] shadow-lg hover:bg-green-50 active:scale-[0.98] transition-all"
+                            >
+                                {isUndoing ? (
+                                    <div className="w-4 h-4 border-2 border-green-700/30 border-t-green-700 rounded-full animate-spin"></div>
+                                ) : (
+                                    <RotateCcw size={16} />
+                                )}
+                                Deshacer Registro
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -388,6 +469,19 @@ export default function InventoryAdmin() {
                     <AlertTriangle size={20} className="text-red-500 flex-shrink-0" />
                     <p className="font-medium text-sm">{errorMsg}</p>
                     <button onClick={() => setErrorMsg('')} className="ml-auto text-red-400 hover:text-red-600"><X size={16} /></button>
+                </div>
+            )}
+
+            {/* Saving Overlay */}
+            {isSaving && (
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200">
+                    <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-300">
+                        <div className="relative">
+                            <div className="w-16 h-16 border-4 border-gray-100 rounded-full"></div>
+                            <div className="w-16 h-16 border-4 border-coca-red border-t-transparent rounded-full animate-spin absolute top-0 left-0"></div>
+                        </div>
+                        <p className="font-black text-gray-900 uppercase tracking-widest text-sm">Procesando Registro...</p>
+                    </div>
                 </div>
             )}
 
@@ -413,9 +507,23 @@ export default function InventoryAdmin() {
 
                 {formMode !== 'none' ? (
                     <div className="bg-white rounded-2xl shadow-md p-6 border border-gray-100 animate-in fade-in slide-in-from-top-4 duration-300">
-                        <h2 className="text-xl font-semibold mb-6 border-b pb-4 flex items-center gap-2">
-                            {formMode === 'ingreso' ? 'Registrar Nuevo Entrada de Material' : 'Registrar Salida de Material'}
-                        </h2>
+                        <div className="flex justify-between items-center mb-6 border-b pb-4">
+                            <h2 className="text-xl font-semibold flex items-center gap-2">
+                                {formMode === 'ingreso' ? 'Registrar Nuevo Entrada de Material' : 'Registrar Salida de Material'}
+                            </h2>
+                            <button
+                                onClick={() => {
+                                    setFormMode('none');
+                                    setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: getLocalDateString() });
+                                    setChannelWarning('');
+                                    setImageFile(null);
+                                }}
+                                className="p-2 hover:bg-gray-100 rounded-full text-gray-400 hover:text-gray-600 transition-colors"
+                                title="Cancelar"
+                            >
+                                <X size={24} />
+                            </button>
+                        </div>
 
                         {(() => {
                             let pastLocations: string[] = [];
@@ -460,153 +568,285 @@ export default function InventoryAdmin() {
                                         </div>
                                     )}
 
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Código Identificador {formMode === 'salida' && '(Obligatorio)'}</label>
-                                            <input required type="text" inputMode="numeric" pattern="[0-9]*" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none"
-                                                value={formData.code} onChange={handleCodeChange} placeholder="Escribe el código para auto-rellenar..." />
-                                        </div>
-                                        <div>
-                                            <label className="block text-sm font-medium text-gray-700 mb-1">Descripción {formMode === 'salida' && '(Automático)'}</label>
-                                            <input required type="text" className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`}
-                                                value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} disabled={formMode === 'salida'} />
-                                        </div>
-                                    </div>
+                                    {(() => {
+                                        const isMatch = !!formData.code && products.some(p => p.code.toLowerCase() === formData.code?.toLowerCase());
 
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Canal {formMode === 'salida' && '(Automático)'}</label>
-                                        <select
-                                            className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none appearance-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : 'bg-white'}`}
-                                            value={formData.channel || ''}
-                                            onChange={e => handleChannelChange(e.target.value)}
-                                            disabled={formMode === 'salida'}
-                                            required={formMode === 'ingreso'}
-                                        >
-                                            <option value="" disabled>Seleccione un canal</option>
-                                            <option value="Venta hogar">Venta hogar</option>
-                                            <option value="Publicidad">Publicidad</option>
-                                            <option value="Tradicional">Tradicional</option>
-                                            <option value="Moderno">Moderno</option>
-                                        </select>
-                                        {channelWarning && <p className="text-xs text-orange-600 font-semibold mt-1">{channelWarning}</p>}
-                                    </div>
+                                        return (
+                                            <div className="space-y-4">
+                                                {/* Header persistent with dynamic layout */}
+                                                <div className={`flex flex-col sm:flex-row gap-4 items-start transition-all duration-300 ${isMatch ? 'sm:items-end' : ''}`}>
+                                                    <div className={`w-full transition-all duration-300 ${isMatch ? 'sm:w-1/3' : 'sm:w-full'}`}>
+                                                        <label className={`block font-bold text-gray-500 uppercase tracking-widest mb-1 transition-all ${isMatch ? 'text-[10px]' : 'text-xs'}`}>
+                                                            Código Identificador {formMode === 'salida' && !isMatch && '(Obligatorio)'}
+                                                        </label>
+                                                        <input required type="text" inputMode="numeric" pattern="[0-9]*" id="main-code-input"
+                                                            className={`w-full px-4 border-2 rounded-xl font-black outline-none transition-all duration-300 ${isMatch
+                                                                ? 'bg-green-50 text-green-800 border-green-500 text-xl py-3 text-center sm:text-left cursor-pointer focus:ring-4 focus:ring-green-500/20'
+                                                                : 'bg-white border-gray-200 text-base py-3 focus:border-coca-red focus:ring-4 focus:ring-red-500/10'
+                                                                }`}
+                                                            value={formData.code}
+                                                            onFocus={(e) => { e.currentTarget.select(); }}
+                                                            onChange={handleCodeChange}
+                                                            onKeyDown={(e) => { if (e.key === 'Enter') confirmCode(); }}
+                                                            placeholder={isMatch ? "" : "Escribe el código..."}
+                                                        />
+                                                    </div>
 
-                                    <div>
-                                        <label className="block text-sm font-medium text-gray-700 mb-1">Más detalles {formMode === 'salida' && '(Automático)'}</label>
-                                        <textarea className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`} rows={3}
-                                            value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} disabled={formMode === 'salida'} />
-                                    </div>
-
-                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-5">
-                                        <div className="col-span-1">
-                                            <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">{formMode === 'ingreso' ? 'Stock a Ingresar' : 'Cantidad a Retirar'}</label>
-                                            <input required type="number" inputMode="numeric" pattern="[0-9]*" min="1" className="w-full px-3 md:px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none text-sm md:text-base"
-                                                value={formData.stock || ''} onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} />
-                                        </div>
-                                        <div className="col-span-1">
-                                            <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">Fecha ({formMode === 'ingreso' ? 'Llegada' : 'Entrega'})</label>
-                                            <input required type="date" className="w-full px-2 md:px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none text-sm md:text-base cursor-pointer"
-                                                value={formData.entryDate || ''} onChange={e => setFormData({ ...formData, entryDate: e.target.value })} />
-                                        </div>
-
-                                        {formMode === 'salida' && availableLocationsForSalida.length > 0 && (
-                                            <div className="col-span-2 md:col-span-3 bg-red-50/40 p-4 rounded-xl border border-red-100 mt-2 mb-2">
-                                                <div className="flex justify-between items-center mb-4">
-                                                    <label className="text-sm font-bold text-red-800">Extraer desde:</label>
-                                                    <span className="text-xs font-semibold px-2.5 py-1 bg-white border border-red-200 rounded-md text-red-700 shadow-sm flex items-center gap-1.5">
-                                                        Seleccionado: <span className="font-bold text-sm bg-red-50 px-1.5 rounded">{manualLocations.reduce((acc, curr) => acc + curr.quantity, 0)}</span> / {formData.stock || 0}
-                                                    </span>
+                                                    {isMatch && (
+                                                        <div className="w-full sm:w-2/3 animate-in zoom-in-95 fade-in duration-300">
+                                                            <label className="block text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">
+                                                                {formMode === 'ingreso' ? 'Stock a Ingresar' : 'Cantidad a Retirar'}
+                                                            </label>
+                                                            <input required type="number" inputMode="numeric" pattern="[0-9]*" min="1" id="fast-entry-stock"
+                                                                className="w-full px-4 py-3 bg-white border-2 border-gray-200 rounded-xl focus:border-coca-red focus:ring-4 focus:ring-red-500/10 outline-none text-xl font-black text-center sm:text-left transition-all"
+                                                                value={formData.stock || ''}
+                                                                onFocus={(e) => { e.currentTarget.select(); }}
+                                                                onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })}
+                                                                onKeyDown={(e) => {
+                                                                    if (e.key === 'Enter') {
+                                                                        e.preventDefault();
+                                                                        const detailsInput = document.querySelector('input[placeholder="Ej: Pasillo 3..."]') as HTMLInputElement;
+                                                                        if (detailsInput) detailsInput.focus();
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </div>
+                                                    )}
                                                 </div>
 
-                                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                                    {availableLocationsForSalida.map(loc => {
-                                                        const maxAvailable = getAvailableStockInLocation(formData.code || '', loc);
-                                                        const currentQty = manualLocations.find(m => m.location === loc)?.quantity || 0;
-                                                        const totalSelected = manualLocations.reduce((acc, curr) => acc + curr.quantity, 0);
-                                                        const canAdd = currentQty < maxAvailable && totalSelected < (formData.stock || 0);
-
-                                                        return (
-                                                            <div key={loc} className={`bg-white border rounded-xl p-3 shadow-sm flex flex-col justify-between transition-colors ${currentQty > 0 ? 'border-red-400 ring-1 ring-red-400/20' : 'border-red-200'}`}>
-                                                                <div className="mb-3">
-                                                                    <div className="text-sm font-bold text-gray-800 truncate" title={loc}>{loc}</div>
-                                                                    <div className="text-xs text-gray-500 font-medium mt-0.5">Stock local: <span className="text-gray-700 font-bold">{maxAvailable}</span></div>
+                                                {isMatch ? (
+                                                    <div className="space-y-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                                                        <div className="bg-gray-50 border border-gray-200 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-sm relative overflow-hidden">
+                                                            <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500"></div>
+                                                            <div className="pl-2">
+                                                                <div className="flex items-center gap-1.5 mb-0.5">
+                                                                    <CheckCircle2 size={14} className="text-green-600" />
+                                                                    <p className="text-[10px] text-green-700 uppercase tracking-widest font-black">Producto Reconocido</p>
                                                                 </div>
+                                                                <p className="font-bold text-gray-900 text-base leading-tight">{formData.name}</p>
+                                                            </div>
+                                                            <div className="pl-2 sm:pl-0 flex items-center gap-2">
+                                                                {formData.channel && <span className="inline-block text-[10px] bg-white text-gray-600 px-2 py-0.5 rounded border border-gray-200 font-bold uppercase tracking-wider shadow-sm">{formData.channel}</span>}
+                                                            </div>
+                                                        </div>
 
-                                                                <div className="flex items-center justify-between bg-gray-50 rounded-lg p-1 border border-gray-100">
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={currentQty === 0}
-                                                                        onClick={() => {
-                                                                            const newArr = [...manualLocations];
-                                                                            const idx = newArr.findIndex(m => m.location === loc);
-                                                                            if (idx >= 0) {
-                                                                                if (newArr[idx].quantity > 1) {
-                                                                                    newArr[idx].quantity -= 1;
-                                                                                } else {
-                                                                                    newArr.splice(idx, 1);
-                                                                                }
-                                                                                setManualLocations(newArr);
-                                                                            }
-                                                                        }}
-                                                                        className="w-8 h-8 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-300 disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-gray-200 disabled:hover:text-gray-600 transition-colors shadow-sm cursor-pointer"
-                                                                    >
-                                                                        <span className="text-lg font-bold leading-none select-none">-</span>
-                                                                    </button>
+                                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Fecha ({formMode === 'ingreso' ? 'Llegada' : 'Entrega'})</label>
+                                                                <input required type="date" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:border-coca-red focus:ring-4 focus:ring-red-500/10 outline-none text-sm font-bold cursor-pointer transition-all"
+                                                                    value={formData.entryDate || ''} onChange={e => setFormData({ ...formData, entryDate: e.target.value })} />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">{formMode === 'ingreso' ? 'Ubicación Física' : 'Entregado a / Motivo'}</label>
+                                                                <input required={formMode === 'salida'} type="text" className={`w-full px-4 py-3 border-2 rounded-xl outline-none text-sm font-bold transition-all ${formMode === 'ingreso' && isNewLocation ? 'border-orange-400 bg-orange-50/30 ring-4 ring-orange-500/10 focus:border-orange-500 focus:ring-orange-500/20' : 'border-gray-200 focus:border-coca-red focus:ring-4 focus:ring-red-500/10'}`}
+                                                                    value={formData.details || ''}
+                                                                    onFocus={(e) => { e.currentTarget.select(); }}
+                                                                    onChange={e => setFormData({ ...formData, details: e.target.value })}
+                                                                    onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(new Event('submit') as any); } }}
+                                                                    placeholder="Ej: Pasillo 3..." />
 
-                                                                    <span className="font-bold text-gray-900 w-8 text-center select-none">{currentQty}</span>
+                                                                {formMode === 'ingreso' && isNewLocation && (
+                                                                    <p className="text-[10px] text-orange-600 mt-1 font-bold">⚠️ Ubicación nueva.</p>
+                                                                )}
+                                                                {formMode === 'ingreso' && pastLocations.length > 0 && (
+                                                                    <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                        {pastLocations.map(loc => (
+                                                                            <button key={loc} type="button" onClick={() => setFormData({ ...formData, details: loc })}
+                                                                                className="text-[10px] bg-white hover:bg-gray-100 text-gray-600 px-2 py-1.5 rounded border border-gray-200 font-bold shadow-sm transition-colors cursor-pointer active:scale-95">
+                                                                                {loc}
+                                                                            </button>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">Descripción {formMode === 'salida' && '(Automático)'}</label>
+                                                                <input required type="text" className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`}
+                                                                    value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} disabled={formMode === 'salida'} />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">Canal {formMode === 'salida' && '(Automático)'}</label>
+                                                                <select
+                                                                    className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none appearance-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : 'bg-white'}`}
+                                                                    value={formData.channel || ''}
+                                                                    onChange={e => handleChannelChange(e.target.value)}
+                                                                    disabled={formMode === 'salida'}
+                                                                    required={formMode === 'ingreso'}
+                                                                >
+                                                                    <option value="" disabled>Seleccione un canal</option>
+                                                                    <option value="Venta Hogar">Venta Hogar</option>
+                                                                    <option value="Publicidad">Publicidad</option>
+                                                                    <option value="Tradicional">Tradicional</option>
+                                                                    <option value="Moderno">Moderno</option>
+                                                                </select>
+                                                                {channelWarning && <p className="text-xs text-orange-600 font-semibold mt-1">{channelWarning}</p>}
+                                                            </div>
+                                                        </div>
 
-                                                                    <button
-                                                                        type="button"
-                                                                        disabled={!canAdd}
-                                                                        onClick={() => {
-                                                                            const newArr = [...manualLocations];
-                                                                            const idx = newArr.findIndex(m => m.location === loc);
-                                                                            if (idx >= 0) {
-                                                                                newArr[idx].quantity += 1;
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">Más detalles {formMode === 'salida' && '(Automático)'}</label>
+                                                            <textarea className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`} rows={2}
+                                                                value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} disabled={formMode === 'salida'} />
+                                                        </div>
+
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">{formMode === 'ingreso' ? 'Stock a Ingresar' : 'Cantidad a Retirar'}</label>
+                                                                <input required type="number" inputMode="numeric" pattern="[0-9]*" min="1" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none"
+                                                                    value={formData.stock || ''}
+                                                                    onFocus={(e) => { e.currentTarget.select(); }}
+                                                                    onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            e.preventDefault();
+                                                                            const detailsInput = e.currentTarget.closest('.space-y-4')?.querySelector('input[placeholder*="Juan Pérez"]') as HTMLInputElement;
+                                                                            if (detailsInput) detailsInput.focus();
+                                                                        }
+                                                                    }} />
+                                                            </div>
+                                                            <div>
+                                                                <label className="block text-sm font-medium text-gray-700 mb-1">Fecha ({formMode === 'ingreso' ? 'Llegada' : 'Entrega'})</label>
+                                                                <input required type="date" className="w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none cursor-pointer"
+                                                                    value={formData.entryDate || ''} onChange={e => setFormData({ ...formData, entryDate: e.target.value })} />
+                                                            </div>
+                                                        </div>
+
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 mb-1">{formMode === 'ingreso' ? 'Ubicación / Detalles' : 'Entregado a / Motivo'}</label>
+                                                            <input required={formMode === 'salida'} type="text"
+                                                                className={`w-full px-4 py-2 border rounded-lg focus:outline-none transition-colors ${formMode === 'ingreso' && isNewLocation
+                                                                    ? 'border-orange-400 focus:ring-2 focus:ring-orange-400 bg-orange-50/30'
+                                                                    : 'focus:ring-2 focus:ring-coca-red'
+                                                                    }`}
+                                                                placeholder={formMode === 'salida' ? 'Ej. Juan Pérez - Cuadrilla 3' : ''}
+                                                                value={formData.details}
+                                                                onFocus={(e) => { e.currentTarget.select(); }}
+                                                                onChange={e => setFormData({ ...formData, details: e.target.value })}
+                                                                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleSave(new Event('submit') as any); } }} />
+
+                                                            {formMode === 'ingreso' && isNewLocation && (
+                                                                <p className="text-xs text-orange-600 mt-1 font-medium flex items-center gap-1">
+                                                                    ⚠️ Ubicación nueva (no coincide).
+                                                                </p>
+                                                            )}
+                                                            {formMode === 'ingreso' && pastLocations.length > 0 && (
+                                                                <div className="mt-2 flex flex-wrap gap-1.5">
+                                                                    {pastLocations.map(loc => (
+                                                                        <button key={loc} type="button" onClick={() => setFormData({ ...formData, details: loc })}
+                                                                            className="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded border border-gray-200 transition-colors">
+                                                                            {loc}
+                                                                        </button>
+                                                                    ))}
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
+
+                                    {formMode === 'salida' && availableLocationsForSalida.length > 0 && (
+                                        <div className="bg-red-50/40 p-4 rounded-xl border border-red-100 mt-2 mb-2">
+                                            <div className="flex justify-between items-center mb-4">
+                                                <label className="text-sm font-bold text-red-800">Extraer desde:</label>
+                                                <span className="text-xs font-semibold px-2.5 py-1 bg-white border border-red-200 rounded-md text-red-700 shadow-sm flex items-center gap-1.5">
+                                                    Seleccionado: <span className="font-bold text-sm bg-red-50 px-1.5 rounded">{manualLocations.reduce((acc, curr) => acc + curr.quantity, 0)}</span> / {formData.stock || 0}
+                                                </span>
+                                            </div>
+
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                                {availableLocationsForSalida.map(loc => {
+                                                    const maxAvailable = getAvailableStockInLocation(formData.code || '', loc);
+                                                    const currentQty = manualLocations.find(m => m.location === loc)?.quantity || 0;
+                                                    const totalSelected = manualLocations.reduce((acc, curr) => acc + curr.quantity, 0);
+                                                    const canAdd = currentQty < maxAvailable && totalSelected < (formData.stock || 0);
+
+                                                    return (
+                                                        <div key={loc} className={`bg-white border rounded-xl p-3 shadow-sm flex flex-col justify-between transition-colors ${currentQty > 0 ? 'border-red-400 ring-1 ring-red-400/20' : 'border-red-200'}`}>
+                                                            <div className="mb-3">
+                                                                <div className="text-sm font-bold text-gray-800 truncate" title={loc}>{loc}</div>
+                                                                <div className="text-xs text-gray-500 font-medium mt-0.5">Stock local: <span className="text-gray-700 font-bold">{maxAvailable}</span></div>
+                                                            </div>
+
+                                                            <div className="flex items-center justify-between bg-gray-50 rounded-lg p-1 border border-gray-100">
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={currentQty === 0}
+                                                                    onClick={() => {
+                                                                        const newArr = [...manualLocations];
+                                                                        const idx = newArr.findIndex(m => m.location === loc);
+                                                                        if (idx >= 0) {
+                                                                            if (newArr[idx].quantity > 1) {
+                                                                                newArr[idx].quantity -= 1;
                                                                             } else {
-                                                                                newArr.push({ location: loc, quantity: 1 });
+                                                                                newArr.splice(idx, 1);
                                                                             }
                                                                             setManualLocations(newArr);
-                                                                        }}
-                                                                        className="w-8 h-8 flex items-center justify-center rounded-md bg-coca-red text-white hover:bg-coca-black disabled:opacity-40 disabled:hover:bg-coca-red transition-colors shadow-sm cursor-pointer"
-                                                                    >
-                                                                        <span className="text-lg font-bold leading-none select-none">+</span>
-                                                                    </button>
-                                                                </div>
+                                                                        }
+                                                                    }}
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-300 disabled:opacity-40 disabled:hover:bg-white disabled:hover:border-gray-200 disabled:hover:text-gray-600 transition-colors shadow-sm cursor-pointer"
+                                                                >
+                                                                    <span className="text-lg font-bold leading-none select-none">-</span>
+                                                                </button>
+
+                                                                <span className="font-bold text-gray-900 w-8 text-center select-none">{currentQty}</span>
+
+                                                                <button
+                                                                    type="button"
+                                                                    disabled={!canAdd}
+                                                                    onClick={() => {
+                                                                        const newArr = [...manualLocations];
+                                                                        const idx = newArr.findIndex(m => m.location === loc);
+                                                                        if (idx >= 0) {
+                                                                            newArr[idx].quantity += 1;
+                                                                        } else {
+                                                                            newArr.push({ location: loc, quantity: 1 });
+                                                                        }
+                                                                        setManualLocations(newArr);
+                                                                    }}
+                                                                    className="w-8 h-8 flex items-center justify-center rounded-md bg-coca-red text-white hover:bg-coca-black disabled:opacity-40 disabled:hover:bg-coca-red transition-colors shadow-sm cursor-pointer"
+                                                                >
+                                                                    <span className="text-lg font-bold leading-none select-none">+</span>
+                                                                </button>
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const currentTotal = manualLocations.reduce((s, i) => s + i.quantity, 0);
+                                                                        const currentInLoc = manualLocations.find(m => m.location === loc)?.quantity || 0;
+                                                                        const needed = (formData.stock || 0) - currentTotal;
+                                                                        const availableInLoc = maxAvailable - currentInLoc;
+                                                                        const toAdd = Math.min(needed, availableInLoc);
+
+                                                                        if (toAdd > 0) {
+                                                                            const newArr = [...manualLocations];
+                                                                            const idx = newArr.findIndex(m => m.location === loc);
+                                                                            if (idx >= 0) {
+                                                                                newArr[idx].quantity += toAdd;
+                                                                            } else {
+                                                                                newArr.push({ location: loc, quantity: toAdd });
+                                                                            }
+                                                                            setManualLocations(newArr);
+                                                                        }
+                                                                    }}
+                                                                    disabled={!canAdd}
+                                                                    className="ml-2 px-2 h-8 flex items-center justify-center rounded-md bg-red-100 text-red-700 font-black text-[10px] uppercase tracking-tighter hover:bg-red-200 disabled:opacity-40 transition-all border border-red-200"
+                                                                >
+                                                                    MAX
+                                                                </button>
                                                             </div>
-                                                        );
-                                                    })}
-                                                </div>
+                                                        </div>
+                                                    );
+                                                })}
                                             </div>
-                                        )}
-
-                                        <div className="col-span-2 md:col-span-3">
-                                            <label className="block text-xs md:text-sm font-medium text-gray-700 mb-1">{formMode === 'ingreso' ? 'Ubicación / Detalles' : 'Entregado a / Motivo'}</label>
-                                            <input required={formMode === 'salida'} type="text"
-                                                className={`w-full px-3 md:px-4 py-2 border rounded-lg focus:outline-none text-sm md:text-base transition-colors ${formMode === 'ingreso' && isNewLocation
-                                                    ? 'border-orange-400 focus:ring-2 focus:ring-orange-400 bg-orange-50/30'
-                                                    : 'focus:ring-2 focus:ring-coca-red'
-                                                    }`}
-                                                placeholder={formMode === 'salida' ? 'Ej. Juan Pérez - Cuadrilla 3' : ''}
-                                                value={formData.details} onChange={e => setFormData({ ...formData, details: e.target.value })} />
-
-                                            {formMode === 'ingreso' && isNewLocation && (
-                                                <p className="text-xs text-orange-600 mt-1 font-medium flex items-center gap-1">
-                                                    ⚠️ Ubicación nueva (no coincide).
-                                                </p>
-                                            )}
-                                            {formMode === 'ingreso' && pastLocations.length > 0 && (
-                                                <div className="mt-2 flex flex-wrap gap-1.5">
-                                                    {pastLocations.map(loc => (
-                                                        <button key={loc} type="button" onClick={() => setFormData({ ...formData, details: loc })}
-                                                            className="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded border border-gray-200 transition-colors">
-                                                            {loc}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
                                         </div>
-                                    </div>
+                                    )}
 
                                     <div className="pt-6 flex justify-end gap-3 border-t">
                                         <button disabled={isSaving} type="button" onClick={() => { setFormMode('none'); setManualLocations([]); setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: getLocalDateString() }); setChannelWarning(''); }} className="px-5 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
@@ -660,16 +900,77 @@ export default function InventoryAdmin() {
                             </div>
 
                             {activeTab === 'inventario' && (
-                                <button
-                                    onClick={() => setSortNewestFirst(!sortNewestFirst)}
-                                    className={`flex items-center justify-center gap-2 p-2 px-3 mb-2 rounded-xl border transition-colors shadow-sm ${sortNewestFirst ? 'bg-red-50 text-coca-red border-red-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
-                                    title={sortNewestFirst ? "Orden: Más recientes primero" : "Orden: Más antiguos primero"}
-                                >
-                                    <ArrowUpDown size={18} />
-                                    <span className="text-sm font-semibold hidden sm:inline">
-                                        {sortNewestFirst ? 'Más Recientes' : 'Más Antiguos'}
-                                    </span>
-                                </button>
+                                <div className="flex gap-2 mb-2 items-center">
+                                    {/* Channel Multi-select Filter */}
+                                    <div className="relative">
+                                        <button
+                                            onClick={() => setShowChannelFilter(!showChannelFilter)}
+                                            className={`flex items-center gap-2 p-2 px-3 rounded-xl border transition-all shadow-sm ${selectedChannels.length < ALL_CHANNELS.length ? 'bg-orange-50 text-orange-700 border-orange-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                        >
+                                            <Filter size={18} />
+                                            <span className="text-sm font-semibold hidden sm:inline">
+                                                Canales {selectedChannels.length < ALL_CHANNELS.length && `(${selectedChannels.length})`}
+                                            </span>
+                                            <ChevronDown size={14} className={`transition-transform duration-300 ${showChannelFilter ? 'rotate-180' : ''}`} />
+                                        </button>
+
+                                        {showChannelFilter && (
+                                            <>
+                                                <div className="fixed inset-0 z-10" onClick={() => setShowChannelFilter(false)}></div>
+                                                <div className="absolute left-0 mt-2 w-56 bg-white rounded-2xl shadow-2xl border border-gray-100 z-20 py-3 animate-in fade-in slide-in-from-top-2 duration-200">
+                                                    <div className="px-4 pb-2 mb-2 border-b border-gray-50 flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-gray-400">
+                                                        <span>Filtrar por Canal</span>
+                                                        <button
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                setSelectedChannels(selectedChannels.length === ALL_CHANNELS.length ? [] : ALL_CHANNELS);
+                                                            }}
+                                                            className="text-coca-red hover:underline"
+                                                        >
+                                                            {selectedChannels.length === ALL_CHANNELS.length ? 'Quitar todos' : 'Todos'}
+                                                        </button>
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {ALL_CHANNELS.map(channel => (
+                                                            <label
+                                                                key={channel}
+                                                                className="flex items-center gap-3 px-4 py-2 hover:bg-gray-50 cursor-pointer transition-colors group"
+                                                            >
+                                                                <input
+                                                                    type="checkbox"
+                                                                    className="hidden"
+                                                                    checked={selectedChannels.includes(channel)}
+                                                                    onChange={() => {
+                                                                        if (selectedChannels.includes(channel)) {
+                                                                            setSelectedChannels(selectedChannels.filter(c => c !== channel));
+                                                                        } else {
+                                                                            setSelectedChannels([...selectedChannels, channel]);
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <div className={`w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all ${selectedChannels.includes(channel) ? 'bg-coca-red border-coca-red shadow-[0_2px_10px_rgba(244,0,9,0.2)]' : 'border-gray-200 group-hover:border-gray-300'}`}>
+                                                                    {selectedChannels.includes(channel) && <Check size={14} className="text-white bg-coca-red" />}
+                                                                </div>
+                                                                <span className={`text-sm ${selectedChannels.includes(channel) ? 'text-gray-900 font-bold' : 'text-gray-600 font-medium'}`}>{channel}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+
+                                    <button
+                                        onClick={() => setSortNewestFirst(!sortNewestFirst)}
+                                        className={`flex items-center justify-center gap-2 p-2 px-3 rounded-xl border transition-colors shadow-sm ${sortNewestFirst ? 'bg-red-50 text-coca-red border-red-200' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                        title={sortNewestFirst ? "Orden: Más recientes primero" : "Orden: Más antiguos primero"}
+                                    >
+                                        <ArrowUpDown size={18} />
+                                        <span className="text-sm font-semibold hidden sm:inline">
+                                            {sortNewestFirst ? 'Más Recientes' : 'Más Antiguos'}
+                                        </span>
+                                    </button>
+                                </div>
                             )}
                         </div>
 
@@ -681,24 +982,30 @@ export default function InventoryAdmin() {
                                             <tr>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Producto</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Código</th>
+                                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Canal</th>
                                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
                                                 <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Historial</th>
                                             </tr>
                                         </thead>
                                         <tbody className="bg-white divide-y divide-gray-200">
                                             {isLoading ? (
-                                                <tr><td colSpan={4} className="py-10 text-center text-gray-500"><Loader2 className="animate-spin mx-auto text-coca-red w-8 h-8 mb-2" />Cargando catálogo...</td></tr>
+                                                <tr><td colSpan={5} className="py-10 text-center text-gray-500"><Loader2 className="animate-spin mx-auto text-coca-red w-8 h-8 mb-2" />Cargando catálogo...</td></tr>
                                             ) : products.length === 0 ? (
-                                                <tr><td colSpan={4} className="py-10 text-center text-gray-500">No hay productos registrados en la base de datos de Sheets.</td></tr>
+                                                <tr><td colSpan={5} className="py-10 text-center text-gray-500">No hay productos registrados en la base de datos de Sheets.</td></tr>
                                             ) : (
                                                 <>
                                                     {activeProducts.map(p => (
-                                                        <tr key={p.id || p.code}>
+                                                        <tr key={`${p.code}-${p.channel || 'none'}`}>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 flex items-center gap-3">
                                                                 {p.imageUrl ? <img src={p.imageUrl} className="w-10 h-10 object-cover rounded-md border" /> : <div className="w-10 h-10 bg-gray-100 rounded-md border flex items-center justify-center"><Camera size={16} className="text-gray-400" /></div>}
                                                                 {p.name}
                                                             </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-500">{p.code}</td>
+                                                            <td className="px-6 py-4 whitespace-nowrap">
+                                                                <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${p.channel ? 'bg-orange-50 text-orange-600 border-orange-100' : 'bg-gray-50 text-gray-400 border-gray-100'}`}>
+                                                                    {p.channel || 'Sin Canal'}
+                                                                </span>
+                                                            </td>
                                                             <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                                 <span className="px-2 inline-flex text-xs leading-5 font-bold rounded-full border bg-green-50 text-green-700 border-green-200">
                                                                     {p.stock}
@@ -717,7 +1024,7 @@ export default function InventoryAdmin() {
                                                     {archivedProducts.length > 0 && (
                                                         <>
                                                             <tr>
-                                                                <td colSpan={4} className="px-0 py-0 border-t border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer group" onClick={() => setShowArchivedAdmin(!showArchivedAdmin)}>
+                                                                <td colSpan={5} className="px-0 py-0 border-t border-gray-200 bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer group" onClick={() => setShowArchivedAdmin(!showArchivedAdmin)}>
                                                                     <div className="w-full py-3 flex items-center justify-center gap-2 text-sm font-medium text-gray-500 group-hover:text-gray-700 transition-colors">
                                                                         <Archive size={16} />
                                                                         {showArchivedAdmin ? 'Ocultar' : 'Ver'} {archivedProducts.length} productos agotados (Archivados)
@@ -725,12 +1032,17 @@ export default function InventoryAdmin() {
                                                                 </td>
                                                             </tr>
                                                             {showArchivedAdmin && archivedProducts.map(p => (
-                                                                <tr key={p.id || p.code} className="bg-gray-50/50 opacity-75 grayscale-[0.3]">
+                                                                <tr key={`${p.code}-${p.channel || 'none'}-archived`} className="bg-gray-50/50 opacity-75 grayscale-[0.3]">
                                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-500 flex items-center gap-3">
                                                                         {p.imageUrl ? <img src={p.imageUrl} className="w-10 h-10 object-cover rounded-md border opacity-60" /> : <div className="w-10 h-10 bg-gray-200 rounded-md border flex items-center justify-center"><Camera size={16} className="text-gray-400" /></div>}
                                                                         <span className="line-through decoration-gray-300">{p.name}</span>
                                                                     </td>
                                                                     <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-400">{p.code}</td>
+                                                                    <td className="px-6 py-4 whitespace-nowrap">
+                                                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-400 border border-gray-200 opacity-60">
+                                                                            {p.channel || 'Sin Canal'}
+                                                                        </span>
+                                                                    </td>
                                                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                                                                         <span className="px-2 inline-flex text-xs leading-5 font-bold rounded-full border bg-gray-200 text-gray-600 border-gray-300">
                                                                             Agotado ({p.stock})
@@ -1001,6 +1313,32 @@ export default function InventoryAdmin() {
                                                                     className="w-8 h-8 flex items-center justify-center rounded-md bg-coca-red text-white hover:bg-coca-black disabled:opacity-40 disabled:hover:bg-coca-red transition-colors shadow-sm cursor-pointer"
                                                                 >
                                                                     <span className="text-lg font-bold leading-none select-none">+</span>
+                                                                </button>
+
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        const currentTotal = requestLocations.reduce((s, i) => s + i.quantity, 0);
+                                                                        const currentInLoc = requestLocations.find(m => m.location === loc)?.quantity || 0;
+                                                                        const needed = requestConfirm.req.quantity - currentTotal;
+                                                                        const availableInLoc = maxAvailable - currentInLoc;
+                                                                        const toAdd = Math.min(needed, availableInLoc);
+
+                                                                        if (toAdd > 0) {
+                                                                            const newArr = [...requestLocations];
+                                                                            const idx = newArr.findIndex(m => m.location === loc);
+                                                                            if (idx >= 0) {
+                                                                                newArr[idx].quantity += toAdd;
+                                                                            } else {
+                                                                                newArr.push({ location: loc, quantity: toAdd });
+                                                                            }
+                                                                            setRequestLocations(newArr);
+                                                                        }
+                                                                    }}
+                                                                    disabled={!canAdd}
+                                                                    className="ml-2 px-2 h-8 flex items-center justify-center rounded-md bg-red-100 text-red-700 font-black text-[10px] uppercase tracking-tighter hover:bg-red-200 disabled:opacity-40 transition-all border border-red-200"
+                                                                >
+                                                                    MAX
                                                                 </button>
                                                             </div>
                                                         </div>

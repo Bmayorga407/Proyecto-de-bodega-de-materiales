@@ -73,6 +73,7 @@ export const inventoryService = {
                 description: data.description || '',
                 stock: data.stock || 0,
                 details: data.details || '',
+                channel: data.channel || '',
                 entryDate: data.entryDate || new Date().toISOString().split('T')[0],
                 imageUrl: directImageUrl, // Base64 string will be saved directly into Google Sheets!
                 registeredBy: data.registeredBy || ''

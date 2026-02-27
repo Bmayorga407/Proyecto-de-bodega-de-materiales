@@ -55,8 +55,10 @@ export default function Catalog() {
                 const aggregatedMap = new Map<string, Product>();
 
                 productData.forEach((p) => {
-                    const codeKey = p.code.trim().toLowerCase();
-                    if (!codeKey) return; // Saltamos productos sin código válido
+                    if (!p.code) return; // Saltamos productos sin código válido
+
+                    const channel = (p.channel || '').trim();
+                    const codeKey = `${p.code.trim().toLowerCase()}|${channel.toLowerCase()}`;
 
                     if (aggregatedMap.has(codeKey)) {
                         const existing = aggregatedMap.get(codeKey)!;
