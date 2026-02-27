@@ -87,17 +87,17 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/products', async (req, res) => {
     try {
-        const { name, code, description, stock, details, imageUrl = '', entryDate = '', registeredBy = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl = '', entryDate = '', registeredBy = '', channel = '' } = req.body;
 
         const resource = {
             values: [
-                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate, registeredBy]
+                [Date.now().toString(), code, name, description, stock, imageUrl, details, entryDate, registeredBy, '', channel]
             ],
         };
 
         const sheetRes = await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).inventoryTab}!A:J`,
+            range: `${getSheetNames(req).inventoryTab}!A:K`,
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
@@ -117,7 +117,7 @@ app.get('/api/products', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).inventoryTab}!A:J`,
+            range: `${getSheetNames(req).inventoryTab}!A:K`,
         });
 
         const rows = response.data.values;
@@ -140,7 +140,8 @@ app.get('/api/products', async (req, res) => {
                 details: row[6] || '',
                 entryDate: row[7] || '',
                 registeredBy: row[8] || '',
-                editedBy: row[9] || ''
+                editedBy: row[9] || '',
+                channel: row[10] || ''
             };
         }).filter(p => p.id && p.id.trim() !== '');
 
@@ -203,13 +204,13 @@ app.delete('/api/products/:id', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
     try {
         const productId = req.params.id;
-        const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '', editedBy = '' } = req.body;
+        const { name, code, description, stock, details, imageUrl, entryDate = '', registeredBy = '', editedBy = '', channel = '' } = req.body;
 
         // Fetch all rows to find the exact rowIndex for the given ID
         const { inventoryTab } = getSheetNames(req);
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${inventoryTab}!A:J`,
+            range: `${inventoryTab}!A:K`,
         });
 
         const rows = getRes.data.values;
@@ -227,10 +228,10 @@ app.put('/api/products/:id', async (req, res) => {
         if (rowIndex === -1) return res.status(404).json({ error: 'Product not found' });
 
         // Build the update row (maintaining the original productId timestamp)
-        const updateRange = `${inventoryTab}!A${rowIndex}:J${rowIndex}`;
+        const updateRange = `${inventoryTab}!A${rowIndex}:K${rowIndex}`;
         const resource = {
             values: [
-                [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy, editedBy]
+                [productId, code, name, description, stock, imageUrl, details, entryDate, registeredBy, editedBy, channel]
             ],
         };
 

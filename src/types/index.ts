@@ -10,6 +10,7 @@ export interface Product {
     entryDate?: string;
     registeredBy?: string;
     editedBy?: string;
+    channel?: string;
 }
 
 export interface UserContextType {

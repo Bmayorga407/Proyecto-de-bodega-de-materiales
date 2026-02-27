@@ -159,7 +159,7 @@ export default function ProductDetails() {
                 editedBy: currentUser?.email || undefined
             });
             setEditingProduct(null);
-            setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: '' });
+            setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: '' });
             showSuccess('Registro actualizado correctamente.');
             loadProducts();
         } catch (err) {
@@ -376,6 +376,13 @@ export default function ProductDetails() {
                             <h1 className="text-5xl md:text-6xl font-black text-coca-red tracking-tight break-all uppercase leading-none">
                                 {baseProduct.code}
                             </h1>
+                            {role === 'BODEGA' && baseProduct.channel && (
+                                <div className="mt-4 flex items-center gap-2">
+                                    <span className="text-xs font-bold text-gray-500 uppercase tracking-widest border border-gray-200 px-3 py-1 rounded-full bg-white shadow-sm">
+                                        Canal: <span className="text-coca-red ml-1">{baseProduct.channel}</span>
+                                    </span>
+                                </div>
+                            )}
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-gray-50/50 p-5 rounded-2xl border border-gray-100/50 w-full">
@@ -432,13 +439,13 @@ export default function ProductDetails() {
                     </div>
 
                     <form onSubmit={handleSave} className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                            <div>
-                                <label className="block text-xs font-semibold text-gray-600 mb-1">Stock Registrado</label>
+                        <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+                            <div className="md:col-span-1">
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Stock</label>
                                 <input required type="number" min="0" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
                                     value={formData.stock || ''} onChange={e => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} />
                             </div>
-                            <div>
+                            <div className="md:col-span-1">
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">Fecha de Ingreso</label>
                                 <input required type="date" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
                                     value={formData.entryDate || ''} onChange={e => setFormData({ ...formData, entryDate: e.target.value })} />
@@ -447,6 +454,17 @@ export default function ProductDetails() {
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">Detalles de Ubicación</label>
                                 <input type="text" className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm"
                                     value={formData.details || ''} onChange={e => setFormData({ ...formData, details: e.target.value })} />
+                            </div>
+                            <div className="md:col-span-2">
+                                <label className="block text-xs font-semibold text-gray-600 mb-1">Canal</label>
+                                <select className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm appearance-none bg-white"
+                                    value={formData.channel || ''} onChange={e => setFormData({ ...formData, channel: e.target.value })}>
+                                    <option value="" disabled>Sin canal</option>
+                                    <option value="Venta hogar">Venta hogar</option>
+                                    <option value="Publicidad">Publicidad</option>
+                                    <option value="Tradicional">Tradicional</option>
+                                    <option value="Moderno">Moderno</option>
+                                </select>
                             </div>
                         </div>
 

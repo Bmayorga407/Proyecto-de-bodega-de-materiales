@@ -26,6 +26,7 @@ export default function InventoryAdmin() {
     const [imageFile, setImageFile] = useState<File | null>(null);
     const [showArchivedAdmin, setShowArchivedAdmin] = useState(false);
     const [sortNewestFirst, setSortNewestFirst] = useState(true);
+    const [channelWarning, setChannelWarning] = useState('');
 
     const activeProducts = useMemo(() => {
         let list = products.filter(p => p.stock > 0);
@@ -41,7 +42,7 @@ export default function InventoryAdmin() {
 
     // Form state
     const [formData, setFormData] = useState<Partial<Product>>({
-        name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString()
+        name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: getLocalDateString()
     });
     const [conflictData, setConflictData] = useState<{ existing: Product, submitted: Partial<Product> } | null>(null);
     const [requestConfirm, setRequestConfirm] = useState<{ req: OrderRequest, status: OrderRequest['status'] } | null>(null);
@@ -240,10 +241,23 @@ export default function InventoryAdmin() {
                 code: newCode,
                 name: existingProduct.name,
                 description: existingProduct.description,
+                channel: existingProduct.channel || prev.channel,
                 imageUrl: existingProduct.imageUrl || prev.imageUrl
             }));
+            setChannelWarning('');
         } else {
             setFormData(prev => ({ ...prev, code: newCode }));
+            setChannelWarning('');
+        }
+    };
+
+    const handleChannelChange = (val: string) => {
+        setFormData(prev => ({ ...prev, channel: val }));
+        const existingProduct = products.find(p => p.code.toLowerCase() === formData.code?.toLowerCase());
+        if (existingProduct && existingProduct.channel && existingProduct.channel !== val) {
+            setChannelWarning(`Nota: Este código está asociado al canal "${existingProduct.channel}".`);
+        } else {
+            setChannelWarning('');
         }
     };
 
@@ -324,7 +338,8 @@ export default function InventoryAdmin() {
             setTimeout(() => {
                 setSuccessMsg('');
                 setFormMode('none');
-                setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0] });
+                setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: new Date().toISOString().split('T')[0] });
+                setChannelWarning('');
                 setImageFile(null);
                 setManualLocations([]);
                 loadData(); // refresh the table
@@ -459,6 +474,24 @@ export default function InventoryAdmin() {
                                     </div>
 
                                     <div>
+                                        <label className="block text-sm font-medium text-gray-700 mb-1">Canal {formMode === 'salida' && '(Automático)'}</label>
+                                        <select
+                                            className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none appearance-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : 'bg-white'}`}
+                                            value={formData.channel || ''}
+                                            onChange={e => handleChannelChange(e.target.value)}
+                                            disabled={formMode === 'salida'}
+                                            required={formMode === 'ingreso'}
+                                        >
+                                            <option value="" disabled>Seleccione un canal</option>
+                                            <option value="Venta hogar">Venta hogar</option>
+                                            <option value="Publicidad">Publicidad</option>
+                                            <option value="Tradicional">Tradicional</option>
+                                            <option value="Moderno">Moderno</option>
+                                        </select>
+                                        {channelWarning && <p className="text-xs text-orange-600 font-semibold mt-1">{channelWarning}</p>}
+                                    </div>
+
+                                    <div>
                                         <label className="block text-sm font-medium text-gray-700 mb-1">Más detalles {formMode === 'salida' && '(Automático)'}</label>
                                         <textarea className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-coca-red outline-none ${formMode === 'salida' ? 'bg-gray-100 text-gray-600' : ''}`} rows={3}
                                             value={formData.description} onChange={e => setFormData({ ...formData, description: e.target.value })} disabled={formMode === 'salida'} />
@@ -576,7 +609,7 @@ export default function InventoryAdmin() {
                                     </div>
 
                                     <div className="pt-6 flex justify-end gap-3 border-t">
-                                        <button disabled={isSaving} type="button" onClick={() => { setFormMode('none'); setManualLocations([]); setFormData({ name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString() }); }} className="px-5 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
+                                        <button disabled={isSaving} type="button" onClick={() => { setFormMode('none'); setManualLocations([]); setFormData({ name: '', code: '', description: '', stock: 0, details: '', channel: '', imageUrl: '', entryDate: getLocalDateString() }); setChannelWarning(''); }} className="px-5 py-2 text-gray-700 hover:bg-gray-100 rounded-lg font-medium transition-colors">
                                             Cancelar
                                         </button>
                                         <button disabled={isSaving} type="submit" className={`px-5 py-2 text-white rounded-lg font-medium flex items-center gap-2 transition-all 
