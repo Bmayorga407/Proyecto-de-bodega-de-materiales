@@ -480,7 +480,7 @@ export default function ProductDetails() {
 
                 // Ordenar ubicaciones para descontar
                 const locationsWithStock = products
-                    .filter(p => p.stock > 0 && p.details)
+                    .filter(p => p.stock > 0)
                     .sort((a, b) => a.stock - b.stock);
 
                 for (const locProduct of locationsWithStock) {
@@ -488,13 +488,18 @@ export default function ProductDetails() {
 
                     const deductFromThisLoc = Math.min(locProduct.stock, remainingToDeduct);
 
-                    const locClean = getCleanLocation(locProduct.details);
+                    let locName = getCleanLocation(locProduct.details);
+                    // Si la ubicación extraída parece un movimiento previo, fallback a genérico
+                    if (locName.toUpperCase().includes('BAJA') || locName.toUpperCase().includes('ENTREGA') || locName.toUpperCase().includes('RECEPTOR')) {
+                        locName = 'Sin ubicación';
+                    }
+
                     let finalDetails = '';
                     if (isBaja) {
                         const effectiveReason = manualReason || receptorName.trim() || 'No especificado';
-                        finalDetails = `[${locClean}] BAJA - Motivo: ${effectiveReason}`;
+                        finalDetails = `[${locName}] BAJA - Motivo: ${effectiveReason}`;
                     } else {
-                        finalDetails = `[${locClean}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
+                        finalDetails = `[${locName}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
                     }
 
                     await inventoryService.addProduct({
@@ -510,10 +515,19 @@ export default function ProductDetails() {
                     remainingToDeduct -= deductFromThisLoc;
                 }
 
-                // Si por alguna razón queda algo por descontar (ej: el stock total era inconsistente), 
-                // hacemos un último descuento genérico o error (opcional)
+                // Si por alguna razón queda algo por descontar (ej: el stock total era inconsistente o sin ubicación), 
+                // hacemos un último descuento genérico
                 if (remainingToDeduct > 0) {
-                    console.warn(`No se pudo descontar el total de ${requestQty}. Quedaron ${remainingToDeduct} sin ubicación.`);
+                    const finalReason = manualReason || receptorName.trim() || 'No especificado';
+                    await inventoryService.addProduct({
+                        code: baseProduct.code,
+                        name: baseProduct.name,
+                        stock: -remainingToDeduct,
+                        details: isBaja ? `BAJA - Motivo: ${finalReason}` : `ENTREGA - Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`,
+                        channel: baseProduct.channel || '',
+                        entryDate: getLocalDateString(),
+                        registeredBy: currentUser?.email || 'Bodega'
+                    });
                 }
             }
 

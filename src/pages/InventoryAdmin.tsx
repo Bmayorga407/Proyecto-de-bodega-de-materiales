@@ -102,8 +102,8 @@ export default function InventoryAdmin() {
                             const canDeduct = Math.min(currentStock, remainingToDeduct);
 
                             let locName = getCleanLocation(locProd.details);
-                            // Si la ubicación extraída parece un motivo de baja anterior o no tiene formato de corchete, fallback a genérico
-                            if (!locProd.details?.includes('[') || locName.includes('BAJA') || locName.includes('Entregado')) {
+                            // Si la ubicación extraída parece un movimiento previo, fallback a genérico
+                            if (locName.toUpperCase().includes('BAJA') || locName.toUpperCase().includes('ENTREGA') || locName.toUpperCase().includes('RECEPTOR')) {
                                 locName = 'Sin ubicación';
                             }
 
