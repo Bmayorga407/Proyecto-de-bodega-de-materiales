@@ -81,16 +81,16 @@ export default function InventoryAdmin() {
             for (const item of adminCart) {
                 if (bulkType === 'BAJA') {
                     // Buscar todas las instancias de este producto (por código y canal) para ver ubicaciones con stock
-                    const targetCode = item.productCode.trim().toUpperCase();
-                    const targetChannel = item.channel?.trim().toUpperCase();
+                    const targetCode = String(item.productCode).trim().toUpperCase();
+                    const targetChannel = (item.channel || '').trim().toUpperCase();
 
                     const locationsWithStock = allProducts.filter(p => {
-                        const pCode = p.code.trim().toUpperCase();
+                        const pCode = String(p.code || '').trim().toUpperCase();
                         const pChannel = (p.channel || '').trim().toUpperCase();
+                        // Filtrar por código y canal exacto, con stock positivo
                         return pCode === targetCode &&
                             (!targetChannel || pChannel === targetChannel) &&
-                            Number(p.stock) > 0 &&
-                            p.details;
+                            Number(p.stock) > 0;
                     }).sort((a, b) => Number(a.stock) - Number(b.stock)); // FIFO aproximado (o menor stock primero)
 
                     let remainingToDeduct = item.quantity;
@@ -101,8 +101,11 @@ export default function InventoryAdmin() {
                             const currentStock = Number(locProd.stock);
                             const canDeduct = Math.min(currentStock, remainingToDeduct);
 
-                            const match = locProd.details?.match(/^\[(.*?)\]/);
-                            const locName = match ? match[1].trim() : 'Sin ubicación';
+                            let locName = getCleanLocation(locProd.details);
+                            // Si la ubicación extraída parece un motivo de baja anterior o no tiene formato de corchete, fallback a genérico
+                            if (!locProd.details?.includes('[') || locName.includes('BAJA') || locName.includes('Entregado')) {
+                                locName = 'Sin ubicación';
+                            }
 
                             await inventoryService.addProduct({
                                 code: item.productCode,
