@@ -203,7 +203,7 @@ export default function Catalog() {
             case 'PENDIENTE':
                 return <span className="bg-yellow-100 text-yellow-800 border border-yellow-200 px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1.5"><Clock size={14} /> PENDIENTE</span>;
             case 'APROBADA':
-                return <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1.5"><Truck size={14} /> POR RETIRAR</span>;
+                return <span className="bg-amber-100 text-amber-800 border border-amber-200 px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1.5"><Truck size={14} /> APROBADA - LISTA PARA RETIRAR</span>;
             case 'ENTREGADA':
                 return <span className="bg-green-100 text-green-800 border border-green-200 px-2 py-1 rounded-md text-xs font-bold flex items-center gap-1.5"><CheckCircle2 size={14} /> ENTREGADA</span>;
             case 'RECHAZADA':

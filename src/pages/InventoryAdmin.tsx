@@ -283,20 +283,31 @@ export default function InventoryAdmin() {
 
         const productHistory = allProducts.filter(p => p.code.toLowerCase() === code.toLowerCase());
 
+        let pendingRequestsStock = 0;
+        requests.forEach(r => {
+            if (r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code.toLowerCase()) {
+                pendingRequestsStock += r.quantity;
+            }
+        });
+
         productHistory.forEach(p => {
-            if (p.stock > 0) {
-                const loc = (p.details || 'Sin ubicación').trim();
-                locationStock[loc] = (locationStock[loc] || 0) + p.stock;
+            const qty = Number(p.stock) || 0;
+            if (qty > 0) {
+                const match = p.details?.match(/^\[(.*?)\]/);
+                const loc = match ? match[1].trim() : 'Sin ubicación';
+                locationStock[loc] = (locationStock[loc] || 0) + qty;
             } else {
                 const match = p.details?.match(/^\[(.*?)\]/);
                 if (match) {
                     const loc = match[1].trim();
-                    locationStock[loc] = (locationStock[loc] || 0) + p.stock;
+                    locationStock[loc] = (locationStock[loc] || 0) + qty;
                 } else {
-                    unallocatedNeg += p.stock;
+                    unallocatedNeg += qty;
                 }
             }
         });
+
+        unallocatedNeg -= pendingRequestsStock;
 
         if (unallocatedNeg < 0) {
             for (const loc of Object.keys(locationStock)) {

@@ -5,7 +5,7 @@ import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
-
+import { useAdminCart } from '../context/AdminCartContext';
 
 const getLocalDateString = () => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
@@ -105,7 +105,7 @@ export default function ProductDetails() {
     const navigate = useNavigate();
     const { role, currentUser } = useAuth();
     const { addToCart } = useCart();
-
+    const { addToAdminCart } = useAdminCart();
     const [modalStep, setModalStep] = useState(1); // 1: Qty/Choice, 2: Names (only for Direct)
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
@@ -326,19 +326,25 @@ export default function ProductDetails() {
         let unallocatedNegative = 0;
 
         products.forEach(p => {
-            total += p.stock;
-            if (p.stock > 0) {
+            const qty = Number(p.stock) || 0;
+            total += qty;
+            if (qty > 0) {
                 const loc = extractLocationString(p.details);
-                byLoc[loc] = (byLoc[loc] || 0) + p.stock;
+                byLoc[loc] = (byLoc[loc] || 0) + qty;
             } else {
                 const loc = extractLocationString(p.details);
-                if (loc !== 'Sin ubicación') {
-                    byLoc[loc] = (byLoc[loc] || 0) + p.stock;
+                // Si la deducción tiene ubicación asignable explícita
+                if (loc !== 'Sin ubicación' && String(p.details).includes('[')) {
+                    byLoc[loc] = (byLoc[loc] || 0) + qty;
                 } else {
-                    unallocatedNegative += p.stock;
+                    unallocatedNegative += qty;
                 }
             }
         });
+
+        // Restar también las reservas pendientes o aprobadas que no se hayan descontado de bodega
+        total -= pendingRequestsStock;
+        unallocatedNegative -= pendingRequestsStock;
 
         if (unallocatedNegative < 0) {
             for (const loc of Object.keys(byLoc)) {
@@ -351,8 +357,12 @@ export default function ProductDetails() {
                 }
             }
         }
+
+        console.log(`[stockByLocation Debug] Total: ${total}, UnallocatedNeg Left: ${unallocatedNegative}`);
+        console.log(`[stockByLocation Debug] Final ByLoc:`, byLoc);
+
         return { totalStock: total, stockByLocation: byLoc };
-    }, [products]);
+    }, [products, pendingRequestsStock]);
 
     const locationSuggestions = useMemo(() => {
         const existing = Object.keys(stockByLocation).filter(loc => !loc.toLowerCase().includes('por definir') && stockByLocation[loc] > 0);
@@ -402,7 +412,7 @@ export default function ProductDetails() {
     // Usar el primer producto para los datos de cabecera (suponiendo que nombre e imagen base son iguales)
     const baseProduct = products[0];
 
-    const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA') => {
+    const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA' | 'BAJA') => {
         if (e) e.preventDefault();
         if (requestQty < 1 || requestQty > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
@@ -416,7 +426,7 @@ export default function ProductDetails() {
         }
 
         const receptorParts = receptorName.trim().split(/\s+/);
-        if (receptorParts.length < 2 && !isManualMode) {
+        if (receptorParts.length < 2 && !isManualMode && forceStatus !== 'BAJA') {
             showError('RECHAZADO: Debes ingresar el nombre Y apellido de quién recibe.');
             return;
         }
@@ -425,21 +435,26 @@ export default function ProductDetails() {
         try {
             const isManualReserva = forceStatus === 'APROBADA';
             const isManualEntrega = forceStatus === 'ENTREGADA';
+            const isBaja = forceStatus === 'BAJA';
 
-            const createdReq = await inventoryService.createRequest({
-                productCode: baseProduct.code,
-                productName: baseProduct.name,
-                quantity: requestQty,
-                requestedBy: requestName.trim(),
-                receptorName: receptorName.trim() || requestName.trim(),
-                requesterEmail: currentUser?.email || '',
-                status: forceStatus || 'PENDIENTE',
-                approvedAt: (isManualReserva || isManualEntrega) ? new Date().toISOString() : undefined,
-                logisticConfirmedAt: ''
-            });
+            let reqId: string | undefined = undefined;
 
-            if (isManualReserva || isManualEntrega) {
-                const reqId = createdReq?.id;
+            if (!isBaja) {
+                const createdReq = await inventoryService.createRequest({
+                    productCode: baseProduct.code,
+                    productName: baseProduct.name,
+                    quantity: requestQty,
+                    requestedBy: requestName.trim(),
+                    receptorName: receptorName.trim() || requestName.trim(),
+                    requesterEmail: currentUser?.email || '',
+                    status: forceStatus || 'PENDIENTE',
+                    approvedAt: (isManualReserva || isManualEntrega) ? new Date().toISOString() : undefined,
+                    logisticConfirmedAt: ''
+                });
+                reqId = createdReq?.id;
+            }
+
+            if (isManualReserva || isManualEntrega || isBaja) {
                 // Lógica de deducción automática por ubicaciones
                 let remainingToDeduct = requestQty;
 
@@ -453,11 +468,19 @@ export default function ProductDetails() {
 
                     const deductFromThisLoc = Math.min(locProduct.stock, remainingToDeduct);
 
+                    const locClean = getCleanLocation(locProduct.details);
+                    let finalDetails = '';
+                    if (isBaja) {
+                        finalDetails = `[${locClean}] BAJA - Motivo: ${receptorName.trim() || 'No especificado'}`;
+                    } else {
+                        finalDetails = `[${locClean}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
+                    }
+
                     await inventoryService.addProduct({
                         code: baseProduct.code,
                         name: baseProduct.name,
                         stock: -deductFromThisLoc,
-                        details: `[${getCleanLocation(locProduct.details)}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`,
+                        details: finalDetails,
                         channel: locProduct.channel,
                         entryDate: getLocalDateString(),
                         registeredBy: currentUser?.email || 'Bodega'
@@ -473,9 +496,12 @@ export default function ProductDetails() {
                 }
             }
 
-            setRequestSuccess(isManualReserva ? 'Reserva guardada en "Por Retirar".' :
-                isManualEntrega ? 'Salida manual registrada con éxito.' :
-                    'Solicitud enviada a bodega con éxito.');
+            setRequestSuccess(
+                isBaja ? 'Baja registrada en el inventario con éxito.' :
+                    isManualReserva ? 'Reserva guardada en "Por Retirar".' :
+                        isManualEntrega ? 'Salida manual registrada con éxito.' :
+                            'Solicitud enviada a bodega con éxito.'
+            );
 
             setTimeout(() => {
                 setIsRequestModalOpen(false);
@@ -502,9 +528,23 @@ export default function ProductDetails() {
             showError('Cantidad inválida o superior al stock disponible.');
             return;
         }
-        // Pasar el producto con el stock total neto (sumado de todas las ubicaciones)
-        addToCart({ ...baseProduct, stock: totalStock }, requestQty);
-        showSuccess(`${baseProduct.name} añadido al carrito.`);
+
+        if (isManualMode) {
+            addToAdminCart({
+                productCode: baseProduct.code,
+                name: baseProduct.name,
+                quantity: requestQty,
+                maxStock: totalStock,
+                imageUrl: baseProduct.imageUrl,
+                channel: baseProduct.channel,
+                location: undefined // Bodega seleccionará esto al procesar todo el carrito en Salida Masiva
+            });
+            showSuccess(`${baseProduct.name} añadido a Lista Masiva.`);
+        } else {
+            // Pasar el producto con el stock total neto (sumado de todas las ubicaciones)
+            addToCart({ ...baseProduct, stock: totalStock }, requestQty);
+            showSuccess(`${baseProduct.name} añadido al carrito.`);
+        }
         setIsRequestModalOpen(false);
         setRequestQty(1);
     };
@@ -994,7 +1034,7 @@ export default function ProductDetails() {
                                         className="w-full py-4 rounded-xl font-bold bg-white text-coca-black border-2 border-coca-black flex justify-center items-center gap-2 hover:bg-gray-50 transition-all shadow-sm active:scale-95"
                                     >
                                         <ShoppingCart size={20} />
-                                        Añadir al Carrito
+                                        {isManualMode ? 'Añadir a Lista Masiva' : 'Añadir al Carrito'}
                                     </button>
                                     <button
                                         type="button"
@@ -1004,6 +1044,17 @@ export default function ProductDetails() {
                                         <Send size={20} />
                                         {isManualMode ? 'Gestión Directa' : 'Pedir Ahora'}
                                     </button>
+                                    {isManualMode && (
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleCreateRequest(e, 'BAJA')}
+                                            disabled={isRequesting || requestQty > totalStock}
+                                            className="w-full py-2 mt-2 text-sm font-semibold text-amber-700 hover:text-amber-800 flex justify-center items-center gap-1.5 transition-colors"
+                                        >
+                                            {isRequesting ? <Loader2 size={16} className="animate-spin" /> : <AlertTriangle size={16} />}
+                                            Dar de Baja Rápida (Merma/Dañado)
+                                        </button>
+                                    )}
                                 </div>
                             </div>
                         ) : (
@@ -1046,7 +1097,7 @@ export default function ProductDetails() {
                                     </div>
                                 </div>
                                 <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre y Apellido de quien recibe</label>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-1">{isManualMode ? 'Nombre de receptor o Motivo de Baja' : 'Nombre y Apellido de quien recibe'}</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
                                         <div className="pl-3 py-3 flex items-center justify-center text-gray-400">
                                             <User size={18} />
@@ -1054,7 +1105,7 @@ export default function ProductDetails() {
                                         <input
                                             type="text"
                                             required
-                                            placeholder="Ej. María Gómez"
+                                            placeholder={isManualMode ? "Ej. Dañado, Merma, Juan Pérez..." : "Ej. María Gómez"}
                                             className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full"
                                             value={receptorName}
                                             onChange={(e) => setReceptorName(e.target.value)}
@@ -1083,6 +1134,21 @@ export default function ProductDetails() {
                                         >
                                             {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                                             {isRequesting ? 'Procesando...' : 'Reservar (Dejar Por Retirar)'}
+                                        </button>
+                                        <div className="relative flex py-2 items-center">
+                                            <div className="flex-grow border-t border-gray-200"></div>
+                                            <span className="flex-shrink-0 mx-4 text-gray-400 font-medium text-xs uppercase tracking-widest">Otras Opciones</span>
+                                            <div className="flex-grow border-t border-gray-200"></div>
+                                        </div>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleCreateRequest(e, 'BAJA')}
+                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
+                                            className={`w-full py-3.5 rounded-xl font-bold text-amber-900 flex justify-center items-center gap-2 transition-all shadow-sm border border-amber-200
+                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200'}`}
+                                        >
+                                            {isRequesting ? <Loader2 size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
+                                            {isRequesting ? 'Procesando...' : 'Dar de Baja (Dañado/Merma)'}
                                         </button>
                                     </div>
                                 ) : (
