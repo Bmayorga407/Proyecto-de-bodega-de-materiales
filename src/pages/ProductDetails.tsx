@@ -1165,10 +1165,13 @@ export default function ProductDetails() {
                                         </div>
                                         <button
                                             type="button"
-                                            onClick={(e) => handleCreateRequest(e, 'BAJA')}
-                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
+                                            onClick={() => {
+                                                setBajaReason(receptorName); // Pre-cargar si escribió algo en el campo receptor
+                                                setIsBajaPromptOpen(true);
+                                            }}
+                                            disabled={isRequesting || requestQty > totalStock}
                                             className={`w-full py-3.5 rounded-xl font-bold text-amber-900 flex justify-center items-center gap-2 transition-all shadow-sm border border-amber-200
-                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200'}`}
+                                                ${isRequesting || requestQty > totalStock ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200'}`}
                                         >
                                             {isRequesting ? <Loader2 size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
                                             {isRequesting ? 'Procesando...' : 'Dar de Baja (Dañado/Merma)'}

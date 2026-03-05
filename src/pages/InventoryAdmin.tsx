@@ -79,27 +79,71 @@ export default function InventoryAdmin() {
 
         try {
             for (const item of adminCart) {
-                const locTag = item.location ? `[${item.location.trim()}] ` : '';
-                const detail = bulkType === 'BAJA'
-                    ? `${locTag}BAJA - Motivo: ${bulkReason}`
-                    : `${locTag}ENTREGA - Receptor: ${bulkReceptor}`;
+                if (bulkType === 'BAJA') {
+                    // Buscar todas las instancias de este producto (por código y canal) para ver ubicaciones con stock
+                    const locationsWithStock = allProducts.filter(p =>
+                        p.code === item.productCode &&
+                        (!item.channel || p.channel === item.channel) &&
+                        Number(p.stock) > 0 &&
+                        p.details
+                    ).sort((a, b) => Number(a.stock) - Number(b.stock)); // FIFO aproximado (o menor stock primero)
 
-                await inventoryService.addProduct({
-                    code: item.productCode,
-                    name: item.name,
-                    stock: -Math.abs(item.quantity),
-                    details: detail,
-                    channel: item.channel || '',
-                    registeredBy: currentUser?.email || 'admin'
-                });
+                    let remainingToDeduct = item.quantity;
 
-                // Safety delay to prevent Google Sheets collisions
-                if (adminCart.length > 1) await new Promise(res => setTimeout(res, 500));
+                    if (locationsWithStock.length > 0) {
+                        for (const locProd of locationsWithStock) {
+                            if (remainingToDeduct <= 0) break;
+                            const currentStock = Number(locProd.stock);
+                            const canDeduct = Math.min(currentStock, remainingToDeduct);
+
+                            const match = locProd.details?.match(/^\[(.*?)\]/);
+                            const locName = match ? match[1].trim() : 'Sin ubicación';
+
+                            await inventoryService.addProduct({
+                                code: item.productCode,
+                                name: item.name,
+                                stock: -canDeduct,
+                                details: `[${locName}] BAJA - Motivo: ${bulkReason || 'No especificado'}`,
+                                channel: item.channel || '',
+                                registeredBy: currentUser?.email || 'admin'
+                            });
+
+                            remainingToDeduct -= canDeduct;
+                            if (adminCart.length > 1 || locationsWithStock.length > 1) await new Promise(res => setTimeout(res, 400));
+                        }
+                    }
+
+                    // Si todavía sobra algo por descontar (o no había stock positivo detectado)
+                    if (remainingToDeduct > 0) {
+                        await inventoryService.addProduct({
+                            code: item.productCode,
+                            name: item.name,
+                            stock: -remainingToDeduct,
+                            details: `BAJA - Motivo: ${bulkReason || 'No especificado'}`,
+                            channel: item.channel || '',
+                            registeredBy: currentUser?.email || 'admin'
+                        });
+                        if (adminCart.length > 1) await new Promise(res => setTimeout(res, 400));
+                    }
+                } else {
+                    // Proceso normal de ENTREGA
+                    const locTag = item.location && item.location !== 'Varias ubicaciones' ? `[${item.location.trim()}] ` : '';
+                    const detail = `${locTag}ENTREGA - Receptor: ${bulkReceptor}`;
+
+                    await inventoryService.addProduct({
+                        code: item.productCode,
+                        name: item.name,
+                        stock: -Math.abs(item.quantity),
+                        details: detail,
+                        channel: item.channel || '',
+                        registeredBy: currentUser?.email || 'admin'
+                    });
+
+                    if (adminCart.length > 1) await new Promise(res => setTimeout(res, 500));
+                }
             }
 
-            // Refresh all data (products + requests) using standardized function
             await loadData();
-
             setSuccessMsg(`Se han procesado ${adminCart.length} salidas con éxito.`);
             clearAdminCart();
             setShowBulkModal(false);
@@ -107,7 +151,7 @@ export default function InventoryAdmin() {
             setBulkReason('');
         } catch (err) {
             console.error('Error in bulk process:', err);
-            setErrorMsg('Hubo un error al procesar algunas salidas. Por favor revisa el inventario.');
+            setErrorMsg('Hubo un error al procesar algunas salidas.');
         } finally {
             setIsProcessingRequest(false);
             setTimeout(() => setSuccessMsg(''), 5000);
