@@ -60,7 +60,8 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 // ----------------------------------------------------
 const TEST_EMAILS = [
     'brian.mayorga@coca-cola.local', // Test Bodega
-    'ventas1@coca-cola.local'        // Test Ventas
+    'ventas1@coca-cola.local',       // Test Ventas
+    'logistica1@coca-cola.local'     // Test Logistica
 ];
 
 function getSheetNames(req) {
@@ -84,6 +85,7 @@ function getSheetNames(req) {
 app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', message: 'Backend Bodega Coca-Cola Operativo en Vercel' });
 });
+
 
 app.post('/api/products', async (req, res) => {
     try {
@@ -257,19 +259,20 @@ app.put('/api/products/:id', async (req, res) => {
 
 app.post('/api/solicitudes', async (req, res) => {
     try {
-        const { productCode, productName, quantity, requestedBy, receptorName = '', status = 'PENDIENTE', dateRequested = new Date().toISOString(), processedBy = '', requesterEmail = '' } = req.body;
+        const { productCode, productName, quantity, requestedBy, receptorName = '', status = 'PENDIENTE', dateRequested = new Date().toISOString(), processedBy = '', requesterEmail = '', approvedAt = '', logisticConfirmedAt = '' } = req.body;
+        const newId = Date.now().toString();
         const resource = {
             values: [
-                [Date.now().toString(), productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail]
+                [newId, productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail, approvedAt, logisticConfirmedAt]
             ],
         };
         await sheets.spreadsheets.values.append({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).requestsTab}!A:J`,
+            range: `${getSheetNames(req).requestsTab}!A:L`,
             valueInputOption: 'USER_ENTERED',
             requestBody: resource,
         });
-        res.status(200).json({ success: true, message: 'Request added successfully' });
+        res.status(200).json({ success: true, message: 'Request added successfully', id: newId });
     } catch (error) {
         console.error('Error adding request:', error);
         res.status(500).json({ success: false, error: 'Failed to add request' });
@@ -280,7 +283,7 @@ app.get('/api/solicitudes', async (req, res) => {
     try {
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${getSheetNames(req).requestsTab}!A:J`,
+            range: `${getSheetNames(req).requestsTab}!A:L`,
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return res.status(200).json([]);
@@ -295,7 +298,9 @@ app.get('/api/solicitudes', async (req, res) => {
             status: row[6] || 'PENDIENTE',
             dateRequested: row[7] || '',
             processedBy: row[8] || '',
-            requesterEmail: row[9] || ''
+            requesterEmail: row[9] || '',
+            approvedAt: row[10] || '',
+            logisticConfirmedAt: row[11] || ''
         })).filter(r => r.id && r.id.trim() !== '');
         res.status(200).json(requests);
     } catch (error) {
@@ -307,12 +312,12 @@ app.get('/api/solicitudes', async (req, res) => {
 app.put('/api/solicitudes/:id', async (req, res) => {
     try {
         const requestId = req.params.id;
-        const { productCode, productName, quantity, requestedBy, receptorName = '', status, dateRequested, processedBy = '', requesterEmail = '' } = req.body;
+        const { productCode, productName, quantity, requestedBy, receptorName = '', status, dateRequested, processedBy = '', requesterEmail = '', approvedAt = '', logisticConfirmedAt = '' } = req.body;
 
         const { requestsTab } = getSheetNames(req);
         const getRes = await sheets.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
-            range: `${requestsTab}!A:J`,
+            range: `${requestsTab}!A:L`,
         });
         const rows = getRes.data.values;
         if (!rows) return res.status(404).json({ error: 'No data' });
@@ -326,10 +331,10 @@ app.put('/api/solicitudes/:id', async (req, res) => {
         }
         if (rowIndex === -1) return res.status(404).json({ error: 'Request not found' });
 
-        const updateRange = `${requestsTab}!A${rowIndex}:J${rowIndex}`;
+        const updateRange = `${requestsTab}!A${rowIndex}:L${rowIndex}`;
         const resource = {
             values: [
-                [requestId, productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail]
+                [requestId, productCode, productName, quantity, requestedBy, receptorName, status, dateRequested, processedBy, requesterEmail, approvedAt, logisticConfirmedAt]
             ],
         };
         await sheets.spreadsheets.values.update({
@@ -342,6 +347,53 @@ app.put('/api/solicitudes/:id', async (req, res) => {
     } catch (error) {
         console.error('Error updating request:', error);
         res.status(500).json({ error: 'Failed to update request' });
+    }
+});
+
+app.delete('/api/solicitudes/:id', async (req, res) => {
+    try {
+        const requestId = req.params.id;
+        const { requestsTab } = getSheetNames(req);
+
+        const sheetMeta = await sheets.spreadsheets.get({ spreadsheetId: SPREADSHEET_ID });
+        const sheetProperties = sheetMeta.data.sheets.find(s => s.properties.title === requestsTab)?.properties;
+        if (!sheetProperties) return res.status(404).json({ error: 'Sheet not found' });
+
+        const getRes = await sheets.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${requestsTab}!A:A`,
+        });
+        const rows = getRes.data.values;
+        if (!rows) return res.status(404).json({ error: 'No data' });
+
+        let rowIndex = -1;
+        for (let i = 0; i < rows.length; i++) {
+            if (rows[i][0] === requestId) {
+                rowIndex = i;
+                break;
+            }
+        }
+        if (rowIndex === -1) return res.status(404).json({ error: 'Request not found' });
+
+        await sheets.spreadsheets.batchUpdate({
+            spreadsheetId: SPREADSHEET_ID,
+            requestBody: {
+                requests: [{
+                    deleteDimension: {
+                        range: {
+                            sheetId: sheetProperties.sheetId,
+                            dimension: 'ROWS',
+                            startIndex: rowIndex,
+                            endIndex: rowIndex + 1
+                        }
+                    }
+                }]
+            }
+        });
+        res.status(200).json({ success: true, message: 'Deleted' });
+    } catch (error) {
+        console.error('Error deleting request:', error);
+        res.status(500).json({ error: 'Failed to delete request' });
     }
 });
 

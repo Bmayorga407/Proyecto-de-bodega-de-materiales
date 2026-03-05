@@ -8,7 +8,7 @@ import {
 import { auth } from '../config/firebase';
 import { setInventoryUserEmail } from '../services/inventoryService';
 
-type Role = 'BODEGA' | 'VENTAS' | 'SUPERVISOR' | null;
+type Role = 'BODEGA' | 'VENTAS' | 'SUPERVISOR' | 'LOGISTICA' | null;
 
 interface AuthContextType {
     currentUser: User | null;
@@ -39,10 +39,17 @@ const SUPERVISOR_EMAILS = [
     'supervisor@coca-cola.local'
 ];
 
+// Correos exclusivos para logística
+const LOGISTICA_EMAILS = [
+    'logistica@coca-cola.local',
+    'logistica1@coca-cola.local'
+];
+
 // Correos destinados al Testing Environment
 const TEST_EMAILS = [
     'brian.mayorga@coca-cola.local',
-    'ventas1@coca-cola.local'
+    'ventas1@coca-cola.local',
+    'logistica1@coca-cola.local'
 ];
 
 const determineRole = (email: string | null): Role => {
@@ -57,6 +64,11 @@ const determineRole = (email: string | null): Role => {
     // 2. Check if Ventas
     if (VENTAS_EMAILS.includes(lowerEmail)) {
         return 'VENTAS';
+    }
+
+    // 3. Check if Logistica
+    if (LOGISTICA_EMAILS.includes(lowerEmail)) {
+        return 'LOGISTICA';
     }
 
     // 3. Fallback: Everyone else defaults to Bodega

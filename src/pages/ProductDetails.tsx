@@ -1,9 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2, AlertTriangle, ShoppingCart, Eye } from 'lucide-react';
 import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
+import { useCart } from '../context/CartContext';
+
 
 const getLocalDateString = () => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
@@ -12,10 +14,11 @@ const getLocalDateString = () => {
 
 const formatDisplayName = (emailStr: string | undefined): string => {
     if (!emailStr) return 'Bodega (Anterior)';
-    if (emailStr === 'Bodega Desconocida') return emailStr;
-    if (emailStr.includes(' ')) return emailStr; // Ya está formateado
+    const str = String(emailStr);
+    if (str === 'Bodega Desconocida') return str;
+    if (str.includes(' ')) return str; // Ya está formateado
 
-    const namePart = emailStr.split('@')[0];
+    const namePart = str.split('@')[0];
     const parts = namePart.split(/[._-]/);
 
     if (parts.length > 1) {
@@ -30,29 +33,80 @@ const formatDisplayName = (emailStr: string | undefined): string => {
     return namePart.charAt(0).toUpperCase() + namePart.slice(1);
 };
 
-const extractLocationAndDetail = (detailsString: string | undefined) => {
-    if (!detailsString) return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: '-' };
+const extractLocationString = (detailsString: any): string => {
+    const str = detailsString != null ? String(detailsString).trim() : '';
+    if (!str) return 'Sin ubicación';
+    const match = str.match(/^\[(.*?)\]/);
+    if (match) return match[1].trim();
+    if (str.toLowerCase().includes('salida manual a:')) return 'Sin ubicación';
+    return str;
+};
 
-    // Check for [Location] Detail format
-    const match = detailsString.match(/^\[(.*?)\]\s*(.*)$/);
+const getCleanLocation = (details: any): string => {
+    const str = String(details || '').trim();
+    if (!str) return '';
+    // Extraer solo lo que está entre el primer par de corchetes, o devolver todo si no hay
+    const match = str.match(/\[(.*?)\]/);
+    if (match) return match[1].trim();
+    return str;
+};
+
+const extractLocationAndDetail = (detailsString: any) => {
+    const rawStr = detailsString != null ? String(detailsString).trim() : '';
+    if (!rawStr) return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: '-', requestId: null };
+
+    // Extraer ID de vinculación oculto si existe (con trim para evitar espacios extras)
+    const parts = rawStr.split(' ||REQ:');
+    const str = parts[0];
+    const requestId: string | null = parts.length > 1 ? parts[1].trim() : null;
+
+    // Log de depuración (solo en desarrollo)
+    if (parts.length > 1) {
+        console.log('[REQ_LINK] details raw:', rawStr, '| requestId extraido:', requestId);
+    }
+
+    // Detectar formato [Ubicación] Detalle
+    const match = str.match(/^\[+(.*)\]\s*(.*)$/);
     if (match) {
-        return { location: match[1], detail: match[2] };
+        let locText = match[1].split(']')[0].trim();
+        let detailText = (match[2] || '').trim();
+
+        // Limpiar prefijo "Receptor:" y formatear visualmente
+        detailText = detailText.replace(/^Receptor:\s*/i, '').trim();
+
+        if (detailText) {
+            return {
+                location: locText,
+                detail: <span className="flex items-center gap-1"><span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span> <span className="font-medium text-gray-700">{detailText}</span></span>,
+                requestId
+            };
+        }
+
+        return { location: locText, detail: '-', requestId };
     }
 
-    // Legacy fallback: Check if it looks like a manual exit without brackets
-    if (detailsString.toLowerCase().includes('salida manual a:')) {
-        return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: detailsString };
+    // Legacy fallback: Salida manual antigua sin corchetes
+    if (str.toLowerCase().includes('salida manual a:')) {
+        const legacyName = str.toLowerCase().replace('salida manual a:', '').trim();
+        return {
+            location: <span className="text-gray-300 italic">Sin ubicación</span>,
+            detail: <span className="flex items-center gap-1"><span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span> <span className="font-medium text-gray-700">{legacyName}</span></span>,
+            requestId
+        };
     }
 
-    // Otherwise, assume it's just a raw location (like during Ingresos)
-    return { location: detailsString, detail: '-' };
+    return { location: str, detail: '-', requestId };
 };
 
 export default function ProductDetails() {
     const { code } = useParams();
+    const [searchParams] = useSearchParams();
+    const reqIdParam = searchParams.get('reqId');
     const navigate = useNavigate();
     const { role, currentUser } = useAuth();
+    const { addToCart } = useCart();
 
+    const [modalStep, setModalStep] = useState(1); // 1: Qty/Choice, 2: Names (only for Direct)
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
@@ -60,6 +114,18 @@ export default function ProductDetails() {
 
     const [editingProduct, setEditingProduct] = useState<Product | null>(null);
     const [isRequestModalOpen, setIsRequestModalOpen] = useState(false);
+
+    // Auto-scroll to highlighted movement
+    useEffect(() => {
+        if (reqIdParam) {
+            setTimeout(() => {
+                const element = document.getElementById(`req-${reqIdParam}`);
+                if (element) {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }, 800);
+        }
+    }, [reqIdParam, isLoading]);
     const [requestName, setRequestName] = useState('');
     const [receptorName, setReceptorName] = useState('');
     const [requestQty, setRequestQty] = useState(1);
@@ -67,6 +133,7 @@ export default function ProductDetails() {
     // New Sort/Filter State
     const [sortDesc, setSortDesc] = useState(true);
     const [filterReceptor, setFilterReceptor] = useState('');
+    const [isManualMode, setIsManualMode] = useState(false);
 
     const [isRequesting, setIsRequesting] = useState(false);
     const [requestSuccess, setRequestSuccess] = useState('');
@@ -77,6 +144,9 @@ export default function ProductDetails() {
         name: '', code: '', description: '', stock: 0, details: '', imageUrl: '', entryDate: getLocalDateString()
     });
     const [isImageModalOpen, setIsImageModalOpen] = useState(false);
+
+    const [definingLocationFor, setDefiningLocationFor] = useState<string | null>(null);
+    const [newLocationName, setNewLocationName] = useState('');
 
     const showError = (msg: string) => {
         setErrorMsg(msg);
@@ -93,7 +163,7 @@ export default function ProductDetails() {
         try {
             const requestsData = await inventoryService.fetchRequests();
             const pendingQty = requestsData
-                .filter(r => r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code.toLowerCase())
+                .filter(r => r.status === 'PENDIENTE' && String(r.productCode).toLowerCase() === code.toLowerCase())
                 .reduce((sum, r) => sum + r.quantity, 0);
             setPendingRequestsStock(pendingQty);
         } catch (e) {
@@ -110,12 +180,12 @@ export default function ProductDetails() {
             ]);
 
             // Filtrar solo los movimientos que coincidan con el código de la URL
-            const filteredProducts = data.filter(p => p.code.toLowerCase() === code?.toLowerCase());
+            const filteredProducts = data.filter(p => String(p.code).toLowerCase() === code?.toLowerCase());
             setProducts(filteredProducts);
 
             // Calcular solicitudes pendientes de otros/este usuario para advertencia de stock
             const pendingQty = requestsData
-                .filter(r => r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code?.toLowerCase())
+                .filter(r => r.status === 'PENDIENTE' && String(r.productCode).toLowerCase() === code?.toLowerCase())
                 .reduce((sum, r) => sum + r.quantity, 0);
             setPendingRequestsStock(pendingQty);
 
@@ -170,10 +240,64 @@ export default function ProductDetails() {
         }
     };
 
+    const handleDefineLocation = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!newLocationName.trim() || !definingLocationFor) return;
+
+        setIsSaving(true);
+        try {
+            // Find all history rows (positive stock) that have this exact `details`
+            const rowsToUpdate = products.filter(p =>
+                p.stock > 0 &&
+                (p.details || '').trim() === definingLocationFor
+            );
+
+            for (const row of rowsToUpdate) {
+                if (row.id) {
+                    await inventoryService.updateProduct(row.id, {
+                        ...row,
+                        details: `[${newLocationName.trim()}] Asignado en bodega`
+                    });
+                    await new Promise(res => setTimeout(res, 300));
+                }
+            }
+
+            showSuccess('Ubicación definida correctamente.');
+            setDefiningLocationFor(null);
+            setNewLocationName('');
+            await loadProducts();
+        } catch (error) {
+            console.error(error);
+            showError('Hubo un error al definir la ubicación.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     const confirmDelete = async () => {
         if (!productToDelete) return;
         try {
             setIsLoading(true);
+
+            // Buscar si esta fila tiene una solicitud vinculada
+            const rowToDelete = products.find(p => p.id === productToDelete);
+            console.log('[DELETE_ROW] Fila a borrar:', rowToDelete?.id, '| details:', rowToDelete?.details);
+
+            if (rowToDelete?.details && rowToDelete.details.includes(' ||REQ:')) {
+                const reqId = rowToDelete.details.split(' ||REQ:')[1]?.trim();
+                console.log('[DELETE_ROW] REQ_ID encontrado:', reqId);
+                if (reqId) {
+                    try {
+                        await inventoryService.deleteRequest(reqId);
+                        console.log('[DELETE_ROW] Solicitud vinculada eliminada:', reqId);
+                    } catch (e) {
+                        console.warn('[DELETE_ROW] No se pudo eliminar la solicitud (quizás ya no existe):', e);
+                    }
+                }
+            } else {
+                console.log('[DELETE_ROW] No hay REQ_ID vinculado - borrado simple');
+            }
+
             await inventoryService.deleteProduct(productToDelete);
             setProductToDelete(null);
             showSuccess('Registro eliminado correctamente.');
@@ -188,13 +312,72 @@ export default function ProductDetails() {
     const processedMovements = useMemo(() => {
         let result = [...products];
         if (filterReceptor) {
-            result = result.filter(p => p.details && p.details.toLowerCase().includes(filterReceptor.toLowerCase()));
+            result = result.filter(p => p.details && String(p.details).toLowerCase().includes(filterReceptor.toLowerCase()));
         }
         if (sortDesc) {
             result.reverse();
         }
         return result;
     }, [products, sortDesc, filterReceptor]);
+
+    const { totalStock, stockByLocation } = useMemo(() => {
+        let total = 0;
+        const byLoc: Record<string, number> = {};
+        let unallocatedNegative = 0;
+
+        products.forEach(p => {
+            total += p.stock;
+            if (p.stock > 0) {
+                const loc = extractLocationString(p.details);
+                byLoc[loc] = (byLoc[loc] || 0) + p.stock;
+            } else {
+                const loc = extractLocationString(p.details);
+                if (loc !== 'Sin ubicación') {
+                    byLoc[loc] = (byLoc[loc] || 0) + p.stock;
+                } else {
+                    unallocatedNegative += p.stock;
+                }
+            }
+        });
+
+        if (unallocatedNegative < 0) {
+            for (const loc of Object.keys(byLoc)) {
+                if (unallocatedNegative >= 0) break;
+                if (byLoc[loc] > 0) {
+                    const available = byLoc[loc];
+                    const deduction = Math.min(available, Math.abs(unallocatedNegative));
+                    byLoc[loc] -= deduction;
+                    unallocatedNegative += deduction;
+                }
+            }
+        }
+        return { totalStock: total, stockByLocation: byLoc };
+    }, [products]);
+
+    const locationSuggestions = useMemo(() => {
+        const existing = Object.keys(stockByLocation).filter(loc => !loc.toLowerCase().includes('por definir') && stockByLocation[loc] > 0);
+        if (existing.length > 0) return existing;
+
+        for (let i = products.length - 1; i >= 0; i--) {
+            const p = products[i];
+            if (p && p.details != null) {
+                const detailsStr = String(p.details);
+                const match = detailsStr.match(/^\[(.*?)\]/);
+                if (match) {
+                    const loc = match[1].trim();
+                    if (!loc.toLowerCase().includes('por definir')) {
+                        return [loc];
+                    }
+                } else {
+                    const raw = detailsStr.trim();
+                    if (raw && !raw.toLowerCase().includes('salida manual') && !raw.toLowerCase().includes('por definir')) {
+                        return [raw];
+                    }
+                }
+            }
+        }
+        return [];
+    }, [products, stockByLocation]);
 
     if (isLoading) {
         return (
@@ -218,47 +401,9 @@ export default function ProductDetails() {
 
     // Usar el primer producto para los datos de cabecera (suponiendo que nombre e imagen base son iguales)
     const baseProduct = products[0];
-    const totalStock = products.reduce((sum, p) => sum + p.stock, 0);
 
-    const stockByLocation: Record<string, number> = {};
-    let unallocatedNegative = 0;
-
-    // Fase 1: Asignar stock positivo a sus ubicaciones y stock negativo etiquetado
-    products.forEach(p => {
-        if (p.stock > 0) {
-            const loc = (p.details || 'Sin ubicación').trim();
-            stockByLocation[loc] = (stockByLocation[loc] || 0) + p.stock;
-        } else {
-            // Es una salida. Buscar etiqueta [Ubicación] insertada por el nuevo sistema
-            const match = p.details?.match(/^\[(.*?)\]/);
-            if (match) {
-                const loc = match[1].trim();
-                stockByLocation[loc] = (stockByLocation[loc] || 0) + p.stock;
-            } else {
-                // Salidas del sistema antiguo sin etiqueta de ubicación
-                unallocatedNegative += p.stock; // esto es un número negativo
-            }
-        }
-    });
-
-    // Fase 2: Distribuir las salidas antiguas (negativas) entre las ubicaciones con saldo positivo
-    if (unallocatedNegative < 0) {
-        for (const loc of Object.keys(stockByLocation)) {
-            if (unallocatedNegative >= 0) break;
-
-            if (stockByLocation[loc] > 0) {
-                // Cuánto podemos descontar de esta ubicación
-                const available = stockByLocation[loc];
-                const deduction = Math.min(available, Math.abs(unallocatedNegative));
-
-                stockByLocation[loc] -= deduction;
-                unallocatedNegative += deduction; // Se acerca a 0
-            }
-        }
-    }
-
-    const handleCreateRequest = async (e: React.FormEvent) => {
-        e.preventDefault();
+    const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA') => {
+        if (e) e.preventDefault();
         if (requestQty < 1 || requestQty > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
             return;
@@ -271,35 +416,97 @@ export default function ProductDetails() {
         }
 
         const receptorParts = receptorName.trim().split(/\s+/);
-        if (receptorParts.length < 2) {
+        if (receptorParts.length < 2 && !isManualMode) {
             showError('RECHAZADO: Debes ingresar el nombre Y apellido de quién recibe.');
             return;
         }
 
         setIsRequesting(true);
         try {
-            await inventoryService.createRequest({
+            const isManualReserva = forceStatus === 'APROBADA';
+            const isManualEntrega = forceStatus === 'ENTREGADA';
+
+            const createdReq = await inventoryService.createRequest({
                 productCode: baseProduct.code,
                 productName: baseProduct.name,
                 quantity: requestQty,
                 requestedBy: requestName.trim(),
-                receptorName: receptorName.trim(),
-                requesterEmail: currentUser?.email || ''
+                receptorName: receptorName.trim() || requestName.trim(),
+                requesterEmail: currentUser?.email || '',
+                status: forceStatus || 'PENDIENTE',
+                approvedAt: (isManualReserva || isManualEntrega) ? new Date().toISOString() : undefined,
+                logisticConfirmedAt: ''
             });
-            setRequestSuccess('Solicitud enviada a bodega con éxito.');
+
+            if (isManualReserva || isManualEntrega) {
+                const reqId = createdReq?.id;
+                // Lógica de deducción automática por ubicaciones
+                let remainingToDeduct = requestQty;
+
+                // Ordenar ubicaciones para descontar
+                const locationsWithStock = products
+                    .filter(p => p.stock > 0 && p.details)
+                    .sort((a, b) => a.stock - b.stock);
+
+                for (const locProduct of locationsWithStock) {
+                    if (remainingToDeduct <= 0) break;
+
+                    const deductFromThisLoc = Math.min(locProduct.stock, remainingToDeduct);
+
+                    await inventoryService.addProduct({
+                        code: baseProduct.code,
+                        name: baseProduct.name,
+                        stock: -deductFromThisLoc,
+                        details: `[${getCleanLocation(locProduct.details)}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`,
+                        channel: locProduct.channel,
+                        entryDate: getLocalDateString(),
+                        registeredBy: currentUser?.email || 'Bodega'
+                    });
+
+                    remainingToDeduct -= deductFromThisLoc;
+                }
+
+                // Si por alguna razón queda algo por descontar (ej: el stock total era inconsistente), 
+                // hacemos un último descuento genérico o error (opcional)
+                if (remainingToDeduct > 0) {
+                    console.warn(`No se pudo descontar el total de ${requestQty}. Quedaron ${remainingToDeduct} sin ubicación.`);
+                }
+            }
+
+            setRequestSuccess(isManualReserva ? 'Reserva guardada en "Por Retirar".' :
+                isManualEntrega ? 'Salida manual registrada con éxito.' :
+                    'Solicitud enviada a bodega con éxito.');
+
             setTimeout(() => {
                 setIsRequestModalOpen(false);
+                setIsManualMode(false);
                 setRequestSuccess('');
                 setRequestQty(1);
                 setRequestName('');
                 setReceptorName('');
+                loadProducts();
             }, 2500);
         } catch (err) {
             console.error(err);
-            showError('Error al enviar la solicitud.');
+            showError('Error al procesar la solicitud.');
+            setModalStep(1);
+            showError('Error al crear la solicitud. Por favor intenta de nuevo.');
         } finally {
             setIsRequesting(false);
         }
+    };
+
+    const handleAddToCart = () => {
+        if (!baseProduct) return;
+        if (requestQty < 1 || requestQty > totalStock) {
+            showError('Cantidad inválida o superior al stock disponible.');
+            return;
+        }
+        // Pasar el producto con el stock total neto (sumado de todas las ubicaciones)
+        addToCart({ ...baseProduct, stock: totalStock }, requestQty);
+        showSuccess(`${baseProduct.name} añadido al carrito.`);
+        setIsRequestModalOpen(false);
+        setRequestQty(1);
     };
 
     return (
@@ -411,27 +618,127 @@ export default function ProductDetails() {
                                     <p className="text-xs text-red-800/60 font-medium uppercase tracking-wider mb-1">Por Ubicación</p>
                                     {Object.entries(stockByLocation)
                                         .filter(([_, qty]) => qty > 0)
-                                        .map(([loc, qty]) => (
-                                            <div key={loc} className="flex justify-between items-center text-red-900 bg-white/40 px-3 py-1.5 rounded-lg border border-red-100/50">
-                                                <span className="truncate pr-3 font-medium">{loc}</span>
-                                                <span className="font-bold bg-white px-2.5 py-1 rounded-md text-coca-red shadow-sm border border-red-100/30 whitespace-nowrap">{qty} UN</span>
-                                            </div>
-                                        ))}
+                                        .map(([loc, qty]) => {
+                                            const locStr = loc != null ? String(loc) : '';
+                                            const isPorDefinir = locStr.toLowerCase().includes('por definir');
+                                            return (
+                                                <div key={locStr} className={`flex justify-between items-center px-3 py-2 rounded-xl border ${isPorDefinir ? 'bg-orange-50 border-orange-200/60 shadow-inner' : 'bg-white/40 border-red-100/50'} text-red-900`}>
+                                                    <span className="truncate pr-3 font-medium flex items-center gap-2">
+                                                        {isPorDefinir ? (
+                                                            <span className="flex items-center gap-1.5 text-orange-800 font-bold">
+                                                                <AlertTriangle size={14} className="text-orange-500 shrink-0" />
+                                                                <span className="truncate">{locStr}</span>
+                                                            </span>
+                                                        ) : (
+                                                            locStr
+                                                        )}
+                                                        {role === 'BODEGA' && isPorDefinir && (
+                                                            <button
+                                                                onClick={() => setDefiningLocationFor(locStr)}
+                                                                className="ml-1 text-[10px] text-white bg-orange-500 hover:bg-orange-600 px-2.5 py-1 rounded-full shadow-sm transition-all hover:scale-105 active:scale-95 uppercase tracking-wider font-bold shrink-0"
+                                                            >
+                                                                Asignar
+                                                            </button>
+                                                        )}
+                                                    </span>
+                                                    <span className={`font-bold px-2.5 py-1 rounded-lg shadow-sm border whitespace-nowrap ${isPorDefinir ? 'bg-white text-orange-800 border-orange-200/50' : 'bg-white text-coca-red border-red-100/30'}`}>
+                                                        {qty} UN
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
                                 </div>
                             )}
                         </div>
-                        {role === 'VENTAS' && (
+                        {(role === 'VENTAS' || (role === 'LOGISTICA' && (baseProduct?.channel || '').replace(/\s+/g, '').toLowerCase() === 'ventahogar')) && (
+                            <div className="flex flex-col gap-3">
+                                <button
+                                    onClick={() => { setIsManualMode(false); setIsRequestModalOpen(true); }}
+                                    className="w-full bg-coca-black text-white px-6 py-4 rounded-xl hover:bg-gray-800 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold active:scale-95 text-lg flex items-center justify-center gap-2"
+                                >
+                                    <Send size={20} />
+                                    Gestionar Solicitud
+                                </button>
+                            </div>
+                        )}
+                        {role === 'BODEGA' && (
                             <button
-                                onClick={() => setIsRequestModalOpen(true)}
-                                className="w-full sm:w-auto bg-coca-black text-white px-6 py-4 rounded-xl hover:bg-gray-800 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold active:scale-95 text-lg flex items-center justify-center gap-2"
+                                onClick={() => { setIsManualMode(true); setIsRequestModalOpen(true); }}
+                                className="w-full sm:w-auto bg-red-600 text-white px-6 py-4 rounded-xl hover:bg-red-700 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold active:scale-95 text-lg flex items-center justify-center gap-2"
                             >
                                 <Send size={20} />
-                                Solicitar Material
+                                Salida Manual
                             </button>
                         )}
                     </div>
                 </div>
             </div>
+
+            {/* Modal para Definir Ubicación Rápida */}
+            {definingLocationFor && (
+                <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
+                        <div className="p-5 flex items-start justify-between border-b bg-gray-50 border-gray-100">
+                            <h3 className="text-xl font-bold text-gray-900">Definir Ubicación</h3>
+                            <button onClick={() => setDefiningLocationFor(null)} className="text-gray-400 hover:text-gray-600 outline-none">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <form onSubmit={handleDefineLocation} className="p-5 space-y-4">
+                            <p className="text-sm text-gray-600">
+                                Asigna una ubicación en estantería/bodega para el stock actualmente en: <br />
+                                <strong className="text-gray-900">"{definingLocationFor}"</strong>.
+                            </p>
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-1">Nueva Ubicación</label>
+                                <input
+                                    type="text"
+                                    required
+                                    autoFocus
+                                    placeholder="Ej. Contenedor 2, Pasillo A..."
+                                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-coca-red focus:border-coca-red outline-none text-sm transition-all"
+                                    value={newLocationName}
+                                    onChange={(e) => setNewLocationName(e.target.value)}
+                                />
+                                {locationSuggestions.length > 0 && (
+                                    <div className="mt-2.5 flex items-start flex-col gap-1.5 border-t border-gray-100 pt-3">
+                                        <span className="text-xs text-gray-500 font-medium">Sugerencias:</span>
+                                        <div className="flex flex-wrap gap-2">
+                                            {locationSuggestions.map(sug => (
+                                                <button
+                                                    key={sug}
+                                                    type="button"
+                                                    onClick={() => setNewLocationName(sug)}
+                                                    className="text-xs px-3 py-1.5 bg-gray-100 text-gray-700 hover:bg-orange-50 hover:text-orange-700 hover:border-orange-200 rounded-lg font-medium transition-colors border border-gray-200 shadow-sm"
+                                                >
+                                                    {sug}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setDefiningLocationFor(null)}
+                                    className="flex-1 px-4 py-2 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-xl font-bold transition-colors"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={!newLocationName.trim() || isSaving}
+                                    className={`flex-1 px-4 py-2 text-white rounded-xl font-bold flex justify-center items-center transition-all ${(!newLocationName.trim() || isSaving) ? 'bg-gray-400 cursor-not-allowed' : 'bg-coca-black hover:bg-gray-800 shadow-md'
+                                        }`}
+                                >
+                                    {isSaving ? <Loader2 size={18} className="animate-spin" /> : 'Confirmar'}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
 
             {/* Modal de Edición En Línea */}
             {editingProduct && (
@@ -518,50 +825,74 @@ export default function ProductDetails() {
                                 </tr>
                             </thead>
                             <tbody className="bg-white divide-y divide-gray-100">
-                                {processedMovements.map((p: Product) => (
-                                    <tr key={p.id} className={editingProduct?.id === p.id ? 'bg-red-50/50' : 'hover:bg-gray-50 transition-colors'}>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-l-2 border-transparent">
-                                            {p.entryDate ? new Date(p.entryDate).toLocaleDateString() : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            <div className={`font-bold flex items-center gap-1 px-2 py-1 rounded w-fit ${p.stock > 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
-                                                {p.stock > 0 ? `+${p.stock}` : p.stock}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
-                                            {extractLocationAndDetail(p.details).location}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            {extractLocationAndDetail(p.details).detail}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                            <div className="flex flex-col gap-1.5">
-                                                <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
-                                                    <User size={14} className="text-gray-400" />
-                                                    <span className="text-xs text-gray-600 font-medium whitespace-break-spaces break-all">
-                                                        {formatDisplayName(p.registeredBy)}
-                                                    </span>
+                                {processedMovements.map((p: Product) => {
+                                    const { location, detail, requestId } = extractLocationAndDetail(p.details);
+                                    const isHighlighted = reqIdParam && requestId === reqIdParam;
+
+                                    return (
+                                        <tr
+                                            key={p.id}
+                                            id={requestId ? `req-${requestId}` : undefined}
+                                            className={`${isHighlighted ? 'bg-blue-50 ring-2 ring-blue-200 ring-inset shadow-inner animate-pulse duration-[2000ms]' : ''} ${editingProduct?.id === p.id ? 'bg-red-50/50' : 'hover:bg-gray-50'} transition-all`}
+                                        >
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 border-l-2 border-transparent">
+                                                {p.entryDate ? new Date(p.entryDate).toLocaleDateString() : '-'}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <div className={`font-bold flex items-center gap-1 px-2 py-1 rounded w-fit ${p.stock > 0 ? 'text-green-700 bg-green-50' : 'text-red-700 bg-red-50'}`}>
+                                                    {p.stock > 0 ? `+${p.stock}` : p.stock}
                                                 </div>
-                                                {p.editedBy && (
-                                                    <div className="flex items-center gap-2 px-2 py-1 bg-blue-50 border border-blue-100 rounded-full w-fit">
-                                                        <Edit2 size={12} className="text-blue-400" />
-                                                        <span className="text-[10px] uppercase tracking-wider text-blue-600 font-bold whitespace-break-spaces break-all">
-                                                            {formatDisplayName(p.editedBy)}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-700">
+                                                <div className="flex items-center gap-2">
+                                                    {isHighlighted && <Send size={14} className="text-blue-500 animate-bounce" />}
+                                                    {location}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                {detail}
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                                <div className="flex flex-col gap-1.5">
+                                                    <div className="flex items-center gap-2 px-2 py-1 bg-gray-100 rounded-full w-fit">
+                                                        <User size={14} className="text-gray-400" />
+                                                        <span className="text-xs text-gray-600 font-medium whitespace-break-spaces break-all">
+                                                            {formatDisplayName(p.registeredBy)}
                                                         </span>
                                                     </div>
+                                                    {p.editedBy && (
+                                                        <div className="flex items-center gap-2 px-2 py-1 bg-blue-50 border border-blue-100 rounded-full w-fit">
+                                                            <Edit2 size={12} className="text-blue-400" />
+                                                            <span className="text-[10px] uppercase tracking-wider text-blue-600 font-bold whitespace-break-spaces break-all">
+                                                                {formatDisplayName(p.editedBy)}
+                                                            </span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </td>
+                                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-1">
+                                                {p.stock > 0 && (
+                                                    <button onClick={() => handleEditClick(p)} className="text-blue-500 hover:text-blue-700 transition-colors p-1.5 rounded-full hover:bg-blue-50">
+                                                        <Edit2 size={16} />
+                                                    </button>
                                                 )}
-                                            </div>
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium flex justify-end gap-1">
-                                            <button onClick={() => handleEditClick(p)} className="text-blue-500 hover:text-blue-700 transition-colors p-1.5 rounded-full hover:bg-blue-50">
-                                                <Edit2 size={16} />
-                                            </button>
-                                            <button onClick={() => setProductToDelete(p.id)} className="text-red-400 hover:text-red-700 transition-colors p-1.5 rounded-full hover:bg-red-50">
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </td>
-                                    </tr>
-                                ))}
+                                                {requestId ? (
+                                                    <button
+                                                        onClick={() => navigate(`/admin?tab=solicitudes&highlightReqId=${requestId}`)}
+                                                        title="Ver la solicitud original de este movimiento"
+                                                        className="text-blue-500 hover:text-blue-700 transition-colors p-1.5 rounded-full hover:bg-blue-50"
+                                                    >
+                                                        <Eye size={16} />
+                                                    </button>
+                                                ) : (
+                                                    <button onClick={() => setProductToDelete(p.id)} className="text-red-400 hover:text-red-700 transition-colors p-1.5 rounded-full hover:bg-red-50">
+                                                        <Trash2 size={16} />
+                                                    </button>
+                                                )}
+                                            </td>
+                                        </tr>
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
@@ -619,8 +950,12 @@ export default function ProductDetails() {
                             <div className="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center mb-4 text-coca-red">
                                 <Send size={24} />
                             </div>
-                            <h2 className="text-xl font-bold text-gray-900">Solicitar Material</h2>
-                            <p className="text-sm text-gray-500 mt-1">Ingresa la cantidad que necesitas de {baseProduct.name}.</p>
+                            <h2 className="text-xl font-bold text-gray-900">{isManualMode ? 'Salida Manual' : 'Solicitar Material'}</h2>
+                            <p className="text-sm text-gray-500 mt-1">
+                                {isManualMode
+                                    ? `Registra una salida directa o reserva de ${baseProduct.name}.`
+                                    : `Ingresa la cantidad que necesitas de ${baseProduct.name}.`}
+                            </p>
 
                             {pendingRequestsStock > 0 && (totalStock - pendingRequestsStock < requestQty) && (
                                 <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-3 flex gap-3 text-orange-800 text-sm animate-in fade-in">
@@ -637,22 +972,77 @@ export default function ProductDetails() {
                                 <CheckCircle2 size={20} />
                                 {requestSuccess}
                             </div>
+                        ) : modalStep === 1 ? (
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Cantidad a Retirar</label>
+                                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 p-1">
+                                        <button type="button" onClick={() => setRequestQty(Math.max(1, requestQty - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
+                                        <input type="number" inputMode="numeric" pattern="[0-9]*" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
+                                        <button type="button" onClick={() => setRequestQty(Math.min(totalStock, requestQty + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
+                                    </div>
+                                    <div className="flex justify-between mt-2 text-xs font-semibold px-1">
+                                        <span className="text-gray-500">Mínimo: 1</span>
+                                        <span className="text-gray-500">Máximo: {totalStock} disp.</span>
+                                    </div>
+                                </div>
+
+                                <div className="flex flex-col gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleAddToCart}
+                                        className="w-full py-4 rounded-xl font-bold bg-white text-coca-black border-2 border-coca-black flex justify-center items-center gap-2 hover:bg-gray-50 transition-all shadow-sm active:scale-95"
+                                    >
+                                        <ShoppingCart size={20} />
+                                        Añadir al Carrito
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setModalStep(2)}
+                                        className="w-full py-4 rounded-xl font-bold text-white bg-coca-red hover:bg-red-700 flex justify-center items-center gap-2 transition-all shadow-md active:scale-95"
+                                    >
+                                        <Send size={20} />
+                                        {isManualMode ? 'Gestión Directa' : 'Pedir Ahora'}
+                                    </button>
+                                </div>
+                            </div>
                         ) : (
                             <form onSubmit={handleCreateRequest} className="space-y-5">
+                                <button
+                                    type="button"
+                                    onClick={() => setModalStep(1)}
+                                    className="text-xs font-bold text-gray-400 hover:text-gray-600 flex items-center gap-1 mb-2"
+                                >
+                                    <ArrowLeft size={12} /> Volver a cantidad
+                                </button>
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre y Apellido de quien solicita</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
                                         <div className="pl-3 py-3 flex items-center justify-center text-gray-400">
                                             <User size={18} />
                                         </div>
-                                        <input
-                                            type="text"
-                                            required
-                                            placeholder="Ej. Juan Pérez"
-                                            className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full"
-                                            value={requestName}
-                                            onChange={(e) => setRequestName(e.target.value)}
-                                        />
+                                        {role === 'LOGISTICA' ? (
+                                            <select
+                                                required
+                                                className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full appearance-none"
+                                                value={requestName}
+                                                onChange={(e) => setRequestName(e.target.value)}
+                                            >
+                                                <option value="" disabled>Seleccione Supervisor...</option>
+                                                {['Randolf Mejia', 'Klinsman Gomez', 'Hector Riffo', 'Alvaro Toledo', 'Nicolas Avarzua', 'Jorge Opazo', 'Victor Parra'].map(sup => (
+                                                    <option key={sup} value={sup}>{sup}</option>
+                                                ))}
+                                            </select>
+                                        ) : (
+                                            <input
+                                                type="text"
+                                                required
+                                                placeholder="Ej. Juan Pérez"
+                                                className="flex-1 bg-transparent border-none focus:ring-0 px-3 py-3 text-sm text-gray-900 outline-none w-full"
+                                                value={requestName}
+                                                onChange={(e) => setRequestName(e.target.value)}
+                                            />
+                                        )}
                                     </div>
                                 </div>
                                 <div>
@@ -671,23 +1061,37 @@ export default function ProductDetails() {
                                         />
                                     </div>
                                 </div>
-                                <div>
-                                    <label className="block text-sm font-semibold text-gray-700 mb-2">Cantidad a Retirar</label>
-                                    <div className="flex bg-gray-50 rounded-xl border border-gray-200 p-1">
-                                        <button type="button" onClick={() => setRequestQty(Math.max(1, requestQty - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
-                                        <input type="number" inputMode="numeric" pattern="[0-9]*" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
-                                        <button type="button" onClick={() => setRequestQty(Math.min(totalStock, requestQty + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
+
+                                {isManualMode ? (
+                                    <div className="flex flex-col gap-3">
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleCreateRequest(e, 'ENTREGADA')}
+                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
+                                            className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed' : 'bg-coca-black hover:bg-black hover:shadow-lg'}`}
+                                        >
+                                            {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <X size={20} />}
+                                            {isRequesting ? 'Procesando...' : 'Salida Directa (Descontar ya)'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={(e) => handleCreateRequest(e, 'APROBADA')}
+                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
+                                            className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 hover:shadow-lg'}`}
+                                        >
+                                            {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                            {isRequesting ? 'Procesando...' : 'Reservar (Dejar Por Retirar)'}
+                                        </button>
                                     </div>
-                                    <div className="flex justify-between mt-2 text-xs font-semibold px-1">
-                                        <span className="text-gray-500">Mínimo: 1</span>
-                                        <span className="text-gray-500">Máximo: {totalStock} disp.</span>
-                                    </div>
-                                </div>
-                                <button type="submit" disabled={isRequesting || requestQty > totalStock || !requestName.trim()} className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
-                                    ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed text-gray-100' : 'bg-coca-red hover:bg-red-700 hover:shadow-lg'}`}>
-                                    {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-                                    {isRequesting ? 'Enviando a Bodega...' : 'Confirmar Solicitud'}
-                                </button>
+                                ) : (
+                                    <button type="submit" disabled={isRequesting || requestQty > totalStock || !requestName.trim()} className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                        ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed text-gray-100' : 'bg-coca-red hover:bg-red-700 hover:shadow-lg'}`}>
+                                        {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                        {isRequesting ? 'Enviando a Bodega...' : 'Confirmar Petición Directa'}
+                                    </button>
+                                )}
                             </form>
                         )}
                     </div>

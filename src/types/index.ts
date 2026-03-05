@@ -11,6 +11,7 @@ export interface Product {
     registeredBy?: string;
     editedBy?: string;
     channel?: string;
+    location?: string;
 }
 
 export interface UserContextType {
@@ -33,4 +34,6 @@ export interface OrderRequest {
     dateRequested: string;
     processedBy?: string; // Email of the Bodega user who approved/rejected/delivered
     requesterEmail?: string; // Email of the Ventas user who created it
+    approvedAt?: string;    // ISO timestamp when the request was approved (stock reserved)
+    logisticConfirmedAt?: string; // ISO timestamp when Logistica confirmed reception
 }

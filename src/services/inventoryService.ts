@@ -188,5 +188,15 @@ export const inventoryService = {
             console.error('Error updating request:', error);
             throw error;
         }
+    },
+
+    deleteRequest: async (id: string): Promise<any> => {
+        try {
+            const response = await axios.delete(`${API_URL}/solicitudes/${id}`);
+            return response.data;
+        } catch (error) {
+            console.error('Error deleting request:', error);
+            throw error;
+        }
     }
 };
