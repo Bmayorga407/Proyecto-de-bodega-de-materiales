@@ -555,7 +555,7 @@ export default function ProductDetails() {
                 maxStock: totalStock,
                 imageUrl: baseProduct.imageUrl,
                 channel: baseProduct.channel,
-                location: undefined // Bodega seleccionará esto al procesar todo el carrito en Salida Masiva
+                location: locationSuggestions.length === 1 ? locationSuggestions[0] : (locationSuggestions.length > 1 ? 'Varias ubicaciones' : undefined)
             });
             showSuccess(`${baseProduct.name} añadido a Lista Masiva.`);
         } else {
@@ -1065,7 +1065,13 @@ export default function ProductDetails() {
                                     {isManualMode && (
                                         <button
                                             type="button"
-                                            onClick={(e) => handleCreateRequest(e, 'BAJA')}
+                                            onClick={(e) => {
+                                                const motivo = window.prompt("Indica el motivo de la baja (Ej: Dañado, Producto vencido, Merma)");
+                                                if (motivo !== null) {
+                                                    setReceptorName(motivo.trim() || 'No especificado');
+                                                    handleCreateRequest(e, 'BAJA');
+                                                }
+                                            }}
                                             disabled={isRequesting || requestQty > totalStock}
                                             className="w-full py-2 mt-2 text-sm font-semibold text-amber-700 hover:text-amber-800 flex justify-center items-center gap-1.5 transition-colors"
                                         >
