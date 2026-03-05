@@ -124,6 +124,8 @@ export default function ProductDetails() {
     const { addToCart } = useCart();
     const { addToAdminCart } = useAdminCart();
     const [modalStep, setModalStep] = useState(1); // 1: Qty/Choice, 2: Names (only for Direct)
+    const [isBajaPromptOpen, setIsBajaPromptOpen] = useState(false);
+    const [bajaReason, setBajaReason] = useState('');
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [products, setProducts] = useState<Product[]>([]);
@@ -1065,12 +1067,9 @@ export default function ProductDetails() {
                                     {isManualMode && (
                                         <button
                                             type="button"
-                                            onClick={(e) => {
-                                                const motivo = window.prompt("Indica el motivo de la baja (Ej: Dañado, Producto vencido, Merma)");
-                                                if (motivo !== null) {
-                                                    setReceptorName(motivo.trim() || 'No especificado');
-                                                    handleCreateRequest(e, 'BAJA');
-                                                }
+                                            onClick={() => {
+                                                setBajaReason('');
+                                                setIsBajaPromptOpen(true);
                                             }}
                                             disabled={isRequesting || requestQty > totalStock}
                                             className="w-full py-2 mt-2 text-sm font-semibold text-amber-700 hover:text-amber-800 flex justify-center items-center gap-1.5 transition-colors"
@@ -1192,6 +1191,63 @@ export default function ProductDetails() {
                     <ArrowLeft size={18} /> Volver
                 </button>
             </div>
+            {/* Modal para Motivo de Baja Rápida */}
+            {isBajaPromptOpen && (
+                <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
+                        <div className="p-5 flex items-start gap-4 border-b bg-amber-50/50 border-amber-100">
+                            <div className="p-2 rounded-full bg-amber-100 text-amber-600">
+                                <AlertTriangle size={24} />
+                            </div>
+                            <div className="flex-1 mt-1">
+                                <h3 className="text-xl font-bold text-gray-900">
+                                    Motivo de Baja
+                                </h3>
+                                <p className="text-sm text-gray-500 mt-1">
+                                    Estás a punto de descontar <strong>{requestQty} UN</strong> del inventario.
+                                </p>
+                            </div>
+                            <button onClick={() => setIsBajaPromptOpen(false)} className="text-gray-400 hover:text-gray-600 outline-none">
+                                <X size={20} />
+                            </button>
+                        </div>
+                        <div className="p-5 space-y-4">
+                            <div>
+                                <label className="block text-sm font-semibold text-gray-700 mb-2">Especifica el motivo</label>
+                                <input
+                                    type="text"
+                                    placeholder="Ej: Dañado, Producto vencido, Merma..."
+                                    className="w-full px-4 py-3 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-amber-500 focus:border-transparent outline-none transition-all"
+                                    value={bajaReason}
+                                    onChange={(e) => setBajaReason(e.target.value)}
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="flex gap-3 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => setIsBajaPromptOpen(false)}
+                                    className="flex-1 px-4 py-3 border border-gray-200 rounded-xl text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+                                >
+                                    Cancelar
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={(e) => {
+                                        setIsBajaPromptOpen(false);
+                                        setReceptorName(bajaReason.trim() || 'No especificado');
+                                        handleCreateRequest(e, 'BAJA');
+                                    }}
+                                    disabled={isRequesting}
+                                    className="flex-1 cursor-pointer px-4 py-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-xl font-bold transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center"
+                                >
+                                    {isRequesting ? <Loader2 size={18} className="animate-spin" /> : 'Confirmar Baja'}
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
