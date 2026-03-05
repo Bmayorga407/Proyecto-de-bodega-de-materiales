@@ -431,7 +431,7 @@ export default function ProductDetails() {
     // Usar el primer producto para los datos de cabecera (suponiendo que nombre e imagen base son iguales)
     const baseProduct = products[0];
 
-    const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA' | 'BAJA') => {
+    const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA' | 'BAJA', manualReason?: string) => {
         if (e) e.preventDefault();
         if (requestQty < 1 || requestQty > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
@@ -491,7 +491,8 @@ export default function ProductDetails() {
                     const locClean = getCleanLocation(locProduct.details);
                     let finalDetails = '';
                     if (isBaja) {
-                        finalDetails = `[${locClean}] BAJA - Motivo: ${receptorName.trim() || 'No especificado'}`;
+                        const effectiveReason = manualReason || receptorName.trim() || 'No especificado';
+                        finalDetails = `[${locClean}] BAJA - Motivo: ${effectiveReason}`;
                     } else {
                         finalDetails = `[${locClean}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
                     }
@@ -1238,8 +1239,9 @@ export default function ProductDetails() {
                                     type="button"
                                     onClick={(e) => {
                                         setIsBajaPromptOpen(false);
-                                        setReceptorName(bajaReason.trim() || 'No especificado');
-                                        handleCreateRequest(e, 'BAJA');
+                                        const reason = bajaReason.trim() || 'No especificado';
+                                        setReceptorName(reason);
+                                        handleCreateRequest(e, 'BAJA', reason);
                                     }}
                                     disabled={isRequesting}
                                     className="flex-1 cursor-pointer px-4 py-3 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white rounded-xl font-bold transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center"

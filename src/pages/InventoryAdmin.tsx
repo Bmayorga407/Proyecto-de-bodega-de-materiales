@@ -81,12 +81,17 @@ export default function InventoryAdmin() {
             for (const item of adminCart) {
                 if (bulkType === 'BAJA') {
                     // Buscar todas las instancias de este producto (por código y canal) para ver ubicaciones con stock
-                    const locationsWithStock = allProducts.filter(p =>
-                        p.code === item.productCode &&
-                        (!item.channel || p.channel === item.channel) &&
-                        Number(p.stock) > 0 &&
-                        p.details
-                    ).sort((a, b) => Number(a.stock) - Number(b.stock)); // FIFO aproximado (o menor stock primero)
+                    const targetCode = item.productCode.trim().toUpperCase();
+                    const targetChannel = item.channel?.trim().toUpperCase();
+
+                    const locationsWithStock = allProducts.filter(p => {
+                        const pCode = p.code.trim().toUpperCase();
+                        const pChannel = (p.channel || '').trim().toUpperCase();
+                        return pCode === targetCode &&
+                            (!targetChannel || pChannel === targetChannel) &&
+                            Number(p.stock) > 0 &&
+                            p.details;
+                    }).sort((a, b) => Number(a.stock) - Number(b.stock)); // FIFO aproximado (o menor stock primero)
 
                     let remainingToDeduct = item.quantity;
 
