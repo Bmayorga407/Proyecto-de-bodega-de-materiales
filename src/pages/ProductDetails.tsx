@@ -419,14 +419,16 @@ export default function ProductDetails() {
             return;
         }
 
+        const isBaja = forceStatus === 'BAJA';
+
         const nameParts = requestName.trim().split(/\s+/);
-        if (nameParts.length < 2) {
+        if (!isBaja && nameParts.length < 2) {
             showError('RECHAZADO: Debes ingresar tu nombre Y tu apellido para solicitar.');
             return;
         }
 
         const receptorParts = receptorName.trim().split(/\s+/);
-        if (receptorParts.length < 2 && !isManualMode && forceStatus !== 'BAJA') {
+        if (!isBaja && receptorParts.length < 2 && !isManualMode) {
             showError('RECHAZADO: Debes ingresar el nombre Y apellido de quién recibe.');
             return;
         }
@@ -435,7 +437,6 @@ export default function ProductDetails() {
         try {
             const isManualReserva = forceStatus === 'APROBADA';
             const isManualEntrega = forceStatus === 'ENTREGADA';
-            const isBaja = forceStatus === 'BAJA';
 
             let reqId: string | undefined = undefined;
 
