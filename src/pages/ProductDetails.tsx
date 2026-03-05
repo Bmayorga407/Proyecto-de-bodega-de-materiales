@@ -75,9 +75,13 @@ const extractLocationAndDetail = (detailsString: any) => {
         detailText = detailText.replace(/^Receptor:\s*/i, '').trim();
 
         if (detailText) {
+            const isBaja = detailText.toUpperCase().includes('BAJA');
             return {
                 location: locText,
-                detail: <span className="flex items-center gap-1"><span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span> <span className="font-medium text-gray-700">{detailText}</span></span>,
+                detail: <span className="flex items-center gap-1">
+                    {!isBaja && <span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span>}
+                    <span className={`font-medium ${isBaja ? 'text-coca-red' : 'text-gray-700'}`}>{detailText}</span>
+                </span>,
                 requestId
             };
         }
@@ -88,9 +92,22 @@ const extractLocationAndDetail = (detailsString: any) => {
     // Legacy fallback: Salida manual antigua sin corchetes
     if (str.toLowerCase().includes('salida manual a:')) {
         const legacyName = str.toLowerCase().replace('salida manual a:', '').trim();
+        const isBaja = legacyName.toUpperCase().includes('BAJA');
         return {
             location: <span className="text-gray-300 italic">Sin ubicación</span>,
-            detail: <span className="flex items-center gap-1"><span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span> <span className="font-medium text-gray-700">{legacyName}</span></span>,
+            detail: <span className="flex items-center gap-1">
+                {!isBaja && <span className="font-bold text-gray-400 text-[10px] uppercase">Entrega a:</span>}
+                <span className={`font-medium ${isBaja ? 'text-coca-red' : 'text-gray-700'}`}>{legacyName}</span>
+            </span>,
+            requestId
+        };
+    }
+
+    const isSimpleBaja = str.toUpperCase().includes('BAJA');
+    if (isSimpleBaja) {
+        return {
+            location: <span className="text-gray-300 italic">Sin ubicación</span>,
+            detail: <span className="font-medium text-coca-red">{str}</span>,
             requestId
         };
     }
