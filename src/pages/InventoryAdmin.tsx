@@ -392,7 +392,7 @@ export default function InventoryAdmin() {
             finalQuantity = totalQty;
 
             for (const item of locations) {
-                const availableInLocation = getAvailableStockInLocation(req.productCode, item.location);
+                const availableInLocation = getAvailableStockInLocation(req.productCode, item.location, req.id);
                 if (availableInLocation < item.quantity) {
                     showError(`Error: No puedes reservar ${item.quantity} UN. La ubicación "${item.location}" solo cuenta con ${availableInLocation} UN.`);
                     return;
