@@ -329,16 +329,16 @@ export default function InventoryAdmin() {
 
     }, [highlightReqId, requests]);
 
-    const getAvailableStockInLocation = (code: string, location: string): number => {
+    const getAvailableStockInLocation = (code: string, location: string, excludeRequestId?: string): number => {
         const locationStock: Record<string, number> = {};
         let unallocatedNeg = 0;
 
-        const productHistory = allProducts.filter(p => p.code.toLowerCase() === code.toLowerCase());
+        const productHistory = allProducts.filter(p => (p.code || '').toLowerCase() === code.toLowerCase());
 
         let pendingRequestsStock = 0;
         requests.forEach(r => {
-            if (r.status === 'PENDIENTE' && r.productCode.toLowerCase() === code.toLowerCase()) {
-                pendingRequestsStock += r.quantity;
+            if (r.status === 'PENDIENTE' && (r.productCode || '').toLowerCase() === code.toLowerCase() && r.id !== excludeRequestId) {
+                pendingRequestsStock += Number(r.quantity) || 0;
             }
         });
 
@@ -2271,7 +2271,7 @@ export default function InventoryAdmin() {
 
                                                 <div className="space-y-3">
                                                     {availableLocs.map(loc => {
-                                                        const maxAvailable = getAvailableStockInLocation(requestConfirm.req.productCode, loc);
+                                                        const maxAvailable = getAvailableStockInLocation(requestConfirm.req.productCode, loc, requestConfirm.req.id);
                                                         const currentQty = requestLocations.find(m => m.location === loc)?.quantity || 0;
                                                         const totalSelected = requestLocations.reduce((s, i) => s + i.quantity, 0);
                                                         const canAdd = currentQty < maxAvailable && totalSelected < requestConfirm.req.quantity;

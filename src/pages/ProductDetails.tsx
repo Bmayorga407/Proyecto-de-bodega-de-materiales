@@ -474,7 +474,9 @@ export default function ProductDetails() {
                 reqId = createdReq?.id;
             }
 
-            if (isManualReserva || isManualEntrega || isBaja) {
+            // SOLO descontar del inventario "físico" (agregar fila negativa) si es manual o baja.
+            // Las solicitudes normales de Ventas (PENDIENTE) NO descuentan stock hasta ser aprobadas.
+            if ((isManualReserva || isManualEntrega || isBaja) && forceStatus) {
                 // Lógica de deducción automática por ubicaciones
                 let remainingToDeduct = requestQty;
 

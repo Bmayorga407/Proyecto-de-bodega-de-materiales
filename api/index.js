@@ -129,9 +129,13 @@ app.get('/api/products', async (req, res) => {
             return res.status(200).json([]);
         }
 
-        const data = rows[0][0]?.toLowerCase().includes('id') || rows[0][1]?.toLowerCase().includes('code')
-            ? rows.slice(1)
-            : rows;
+        // Detección robusta de encabezados (si la primera fila contiene palabras clave típicas de títulos)
+        const headerRow = rows[0].map(cell => String(cell || '').toLowerCase());
+        const isHeader = headerRow.some(cell => 
+            ['id', 'code', 'codigo', 'código', 'producto', 'nombre', 'name', 'stock', 'detalles', 'details', 'canal', 'channel'].includes(cell)
+        );
+
+        const data = isHeader ? rows.slice(1) : rows;
 
         const products = data.map(row => {
             return {
@@ -287,7 +291,11 @@ app.get('/api/solicitudes', async (req, res) => {
         });
         const rows = response.data.values;
         if (!rows || rows.length === 0) return res.status(200).json([]);
-        const data = rows[0][0]?.toLowerCase().includes('id') ? rows.slice(1) : rows;
+        const headerRow = rows[0].map(cell => String(cell || '').toLowerCase());
+        const isHeader = headerRow.some(cell => 
+            ['id', 'code', 'codigo', 'código', 'producto', 'nombre', 'name', 'cantidad', 'quantity', 'solicitado', 'requested', 'estado', 'status'].includes(cell)
+        );
+        const data = isHeader ? rows.slice(1) : rows;
         const requests = data.map(row => ({
             id: row[0] || '',
             productCode: row[1] || '',
