@@ -416,10 +416,10 @@ export default function InventoryAdmin() {
             if (status === 'APROBADA') {
                 if (locations && locations.length > 0) {
                     for (const item of locations) {
-                        // Find original product to get its channel
+                        // Find any product entry that matches the cleaned location
                         const originalProduct = allProducts.find(p =>
                             p.code.toLowerCase() === req.productCode.toLowerCase() &&
-                            p.details?.trim() === item.location.trim() &&
+                            getCleanLocation(p.details) === item.location &&
                             p.stock > 0
                         );
                         await inventoryService.addProduct({
@@ -427,7 +427,7 @@ export default function InventoryAdmin() {
                             name: req.productName,
                             description: req.productName,
                             stock: -Math.abs(item.quantity),
-                            details: `[${getCleanLocation(item.location)}] Receptor: ${req.receptorName || req.requestedBy.split('@')[0]} ||REQ:${req.id}`,
+                            details: `[${item.location}] Receptor: ${req.receptorName || req.requestedBy.split('@')[0]} ||REQ:${req.id}`,
                             channel: originalProduct?.channel || '',
                             imageUrl: originalProduct?.imageUrl || '',
                             entryDate: new Date().toISOString().split('T')[0],
@@ -2248,12 +2248,11 @@ export default function InventoryAdmin() {
                                         {requestConfirm.status === 'ENTREGADA' && <>Confirmar que <strong>{requestConfirm.req.requestedBy.split('@')[0]}</strong> retiró <strong>{requestConfirm.req.quantity}x {requestConfirm.req.productName}</strong>. El stock ya fue descontado al aprobar.</>}
                                     </p>
 
-                                    {/* Location picker only for APROBADA - stock is discounted here */}
                                     {requestConfirm.status === 'APROBADA' && (() => {
                                         const locs = new Set<string>();
                                         allProducts.forEach(p => {
-                                            if (p.code.toLowerCase() === requestConfirm.req.productCode.toLowerCase() && p.details && p.stock > 0) {
-                                                locs.add(p.details.trim());
+                                            if ((p.code || '').toLowerCase() === requestConfirm.req.productCode.toLowerCase() && p.details && Number(p.stock) > 0) {
+                                                locs.add(getCleanLocation(p.details));
                                             }
                                         });
                                         const availableLocs = Array.from(locs);

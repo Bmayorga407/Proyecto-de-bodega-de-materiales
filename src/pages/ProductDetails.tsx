@@ -686,8 +686,13 @@ export default function ProductDetails() {
 
                     <div className="flex flex-col gap-3 min-w-[280px] w-full md:w-auto mt-6 md:mt-0">
                         <div className="bg-red-50 border border-red-100/50 p-6 rounded-2xl text-center shadow-inner">
-                            <p className="text-sm text-red-600 font-bold uppercase tracking-widest mb-1">Stock Disponible</p>
+                            <p className="text-[10px] text-red-600 font-bold uppercase tracking-widest mb-1 opacity-70">Disponible para Venta</p>
                             <p className="text-5xl font-black text-coca-red drop-shadow-sm">{totalStock}</p>
+                            {pendingRequestsStock > 0 && (
+                                <p className="text-[10px] text-red-800/60 font-medium mt-1 italic">
+                                    ({pendingRequestsStock} UN reservadas en solicitudes)
+                                </p>
+                            )}
 
                             {/* Stock por ubicación */}
                             {Object.entries(stockByLocation).filter(([_, qty]) => qty > 0).length > 0 && (
