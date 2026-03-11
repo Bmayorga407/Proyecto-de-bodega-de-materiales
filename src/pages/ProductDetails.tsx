@@ -33,15 +33,6 @@ const formatDisplayName = (emailStr: string | undefined): string => {
     return namePart.charAt(0).toUpperCase() + namePart.slice(1);
 };
 
-const extractLocationString = (detailsString: any): string => {
-    const str = detailsString != null ? String(detailsString).trim() : '';
-    if (!str) return 'Sin ubicación';
-    const match = str.match(/^\[(.*?)\]/);
-    if (match) return match[1].trim();
-    if (str.toLowerCase().includes('salida manual a:')) return 'Sin ubicación';
-    return str;
-};
-
 const getCleanLocation = (details: any): string => {
     const str = String(details || '').trim();
     if (!str) return '';
@@ -51,6 +42,11 @@ const getCleanLocation = (details: any): string => {
     return str;
 };
 
+const extractLocationString = (detailsString: any): string => {
+    const cleaned = getCleanLocation(detailsString);
+    if (!cleaned || cleaned.toLowerCase().includes('salida manual a:')) return 'Sin ubicación';
+    return cleaned;
+};
 const extractLocationAndDetail = (detailsString: any) => {
     const rawStr = detailsString != null ? String(detailsString).trim() : '';
     if (!rawStr) return { location: <span className="text-gray-300 italic">Sin ubicación</span>, detail: '-', requestId: null };

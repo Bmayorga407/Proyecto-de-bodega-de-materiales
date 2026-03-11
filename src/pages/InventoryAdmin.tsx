@@ -344,14 +344,13 @@ export default function InventoryAdmin() {
 
         productHistory.forEach(p => {
             const qty = Number(p.stock) || 0;
+            const loc = getCleanLocation(p.details) || 'Sin ubicación';
+            
             if (qty > 0) {
-                const match = p.details?.match(/^\[(.*?)\]/);
-                const loc = match ? match[1].trim() : 'Sin ubicación';
                 locationStock[loc] = (locationStock[loc] || 0) + qty;
             } else {
-                const match = p.details?.match(/^\[(.*?)\]/);
-                if (match) {
-                    const loc = match[1].trim();
+                // Si es negativo y tiene ubicación explícita en los brackets
+                if (String(p.details || '').includes('[')) {
                     locationStock[loc] = (locationStock[loc] || 0) + qty;
                 } else {
                     unallocatedNeg += qty;
