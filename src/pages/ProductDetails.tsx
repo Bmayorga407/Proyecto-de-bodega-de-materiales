@@ -404,6 +404,20 @@ export default function ProductDetails() {
         return [];
     }, [products, stockByLocation]);
 
+    // Calcular todos los canales únicos en el historial
+    const allChannels = useMemo(() => {
+        const channels = new Set<string>();
+        products.forEach(p => {
+            if (p.channel) {
+                p.channel.split(',').forEach(c => {
+                    const trimmed = c.trim();
+                    if (trimmed) channels.add(trimmed);
+                });
+            }
+        });
+        return Array.from(channels);
+    }, [products]);
+
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
@@ -659,11 +673,13 @@ export default function ProductDetails() {
                                 </h1>
                             </div>
 
-                            {baseProduct.channel && (
-                                <div className="transition-all animate-in fade-in slide-in-from-left-4 duration-500 delay-200">
-                                    <span className="inline-block px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-gray-200 shadow-sm">
-                                        {baseProduct.channel}
-                                    </span>
+                            {allChannels.length > 0 && (
+                                <div className="flex flex-wrap gap-2 transition-all animate-in fade-in slide-in-from-left-4 duration-500 delay-200">
+                                    {allChannels.map(ch => (
+                                        <span key={ch} className="inline-block px-3 py-1 bg-gray-100 text-gray-500 rounded-full text-[10px] font-bold tracking-widest uppercase mb-3 border border-gray-200 shadow-sm">
+                                            {ch}
+                                        </span>
+                                    ))}
                                 </div>
                             )}
                         </div>

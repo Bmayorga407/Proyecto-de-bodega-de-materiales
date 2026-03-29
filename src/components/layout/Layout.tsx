@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { LogOut, UserCircle, X, ShoppingCart, Trash2, Send, Loader2, Package, CheckCircle2 } from 'lucide-react';
+import { LogOut, UserCircle, X, ShoppingCart, Trash2, Send, Loader2, Package, CheckCircle2, Info } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useCart } from '../../context/CartContext';
 import { inventoryService } from '../../services/inventoryService';
+import { ChangelogModal } from '../ui/ChangelogModal';
 
 export const Layout = () => {
     const navigate = useNavigate();
@@ -14,6 +15,7 @@ export const Layout = () => {
     const [isCartOpen, setIsCartOpen] = useState(false);
     const [isSendingCart, setIsSendingCart] = useState(false);
     const [cartSuccess, setCartSuccess] = useState(false);
+    const [isChangelogOpen, setIsChangelogOpen] = useState(false);
 
     // Form states for multi-request
     const [requesterName, setRequesterName] = useState('');
@@ -100,6 +102,27 @@ export const Layout = () => {
             <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
                 <Outlet />
             </main>
+
+            <footer className="py-8 border-t border-gray-100 bg-white/50 backdrop-blur-sm mt-auto">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row justify-between items-center gap-4">
+                    <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest text-center sm:text-left">
+                        © {new Date().getFullYear()} Bodega de Materiales Coca-Cola Concepción. Todos los derechos reservados.
+                    </p>
+                    <button 
+                        onClick={() => setIsChangelogOpen(true)}
+                        className="group flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-all active:scale-95 border border-gray-200"
+                    >
+                        <Info size={12} className="text-gray-400 group-hover:text-coca-red transition-colors" />
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Version 1.1.0</span>
+                        <span className="w-1.5 h-1.5 bg-coca-red rounded-full animate-pulse shadow-[0_0_8px_rgba(238,28,46,0.5)]"></span>
+                    </button>
+                </div>
+            </footer>
+
+            {/* Modal de Mejoras (Changelog) */}
+            {isChangelogOpen && (
+                <ChangelogModal onClose={() => setIsChangelogOpen(false)} />
+            )}
 
             {/* Modal de Confirmación de Cierre de Sesión */}
             {isLoggingOut && (

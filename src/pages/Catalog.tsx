@@ -44,6 +44,7 @@ export default function Catalog() {
     const navigate = useNavigate();
     const { currentUser, role } = useAuth();
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedChannel, setSelectedChannel] = useState<'TODOS' | 'TRADICIONAL' | 'MODERNO'>('TODOS');
     const [sortNewestFirst, setSortNewestFirst] = useState(true);
     const [products, setProducts] = useState<Product[]>([]);
     const [myRequests, setMyRequests] = useState<OrderRequest[]>([]);
@@ -73,8 +74,8 @@ export default function Catalog() {
                 productData.forEach((p) => {
                     if (!p.code) return; // Saltamos productos sin código válido
 
+                    const codeKey = p.code.trim().toLowerCase();
                     const channel = (p.channel || '').trim();
-                    const codeKey = `${p.code.trim().toLowerCase()}|${channel.toLowerCase()}`;
 
                     if (aggregatedMap.has(codeKey)) {
                         const existing = aggregatedMap.get(codeKey)!;
@@ -83,6 +84,14 @@ export default function Catalog() {
                         // Si el antiguo no tenía foto y este sí, actualizamos
                         if (!existing.imageUrl && p.imageUrl) {
                             existing.imageUrl = p.imageUrl;
+                        }
+
+                        // Acumular canales únicos (usando un separador)
+                        if (channel) {
+                            const currentChannels = (existing.channel || '').split(',').map(c => c.trim()).filter(Boolean);
+                            if (!currentChannels.includes(channel)) {
+                                existing.channel = [...currentChannels, channel].join(', ');
+                            }
                         }
                     } else {
                         aggregatedMap.set(codeKey, { ...p });
@@ -93,7 +102,7 @@ export default function Catalog() {
 
                 // Restricción para Logística: Ver sólo Venta Hogar
                 if (role === 'LOGISTICA') {
-                    finalProducts = finalProducts.filter(p => (p.channel || '').replace(/\s+/g, '').toLowerCase() === 'ventahogar');
+                    finalProducts = finalProducts.filter(p => (p.channel || '').toLowerCase().includes('ventahogar'));
                 }
 
                 setProducts(finalProducts);
@@ -186,14 +195,14 @@ export default function Catalog() {
     const filteredProducts = useMemo(() => {
         const term = searchTerm.toLowerCase();
         let filtered = products.filter(p =>
-            p.name.toLowerCase().includes(term) ||
-            p.code.toLowerCase().includes(term)
+            (p.name.toLowerCase().includes(term) || p.code.toLowerCase().includes(term)) &&
+            (selectedChannel === 'TODOS' || (p.channel || '').toUpperCase().includes(selectedChannel))
         );
         if (sortNewestFirst) {
             filtered = [...filtered].reverse();
         }
         return filtered;
-    }, [searchTerm, products, sortNewestFirst]);
+    }, [searchTerm, products, sortNewestFirst, selectedChannel]);
 
     const activeProducts = useMemo(() => filteredProducts.filter(p => p.stock > 0), [filteredProducts]);
     const archivedProducts = useMemo(() => filteredProducts.filter(p => p.stock <= 0), [filteredProducts]);
@@ -574,6 +583,21 @@ export default function Catalog() {
                             {sortNewestFirst ? 'Más Recientes' : 'Más Antiguos'}
                         </span>
                     </button>
+                    <div className="flex bg-gray-100 p-1 rounded-xl border border-gray-200 shadow-sm overflow-hidden min-w-fit">
+                        {(['TODOS', 'TRADICIONAL', 'MODERNO'] as const).map((ch) => (
+                            <button
+                                key={ch}
+                                onClick={() => setSelectedChannel(ch)}
+                                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition-all ${selectedChannel === ch
+                                    ? 'bg-white text-coca-red shadow-sm'
+                                    : 'text-gray-500 hover:text-gray-700 hover:bg-white/50'
+                                    }`}
+                            >
+                                {ch}
+                            </button>
+                        ))}
+                    </div>
+
                     <div className="relative w-full md:w-80">
                         <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                             <Search className="h-5 w-5 text-gray-400" />
@@ -605,6 +629,11 @@ export default function Catalog() {
                                     <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover" />
                                 ) : (
                                     <Package size={48} className="text-gray-300 group-hover:scale-110 transition-transform duration-300" />
+                                )}
+                                {product.channel && (
+                                    <div className="absolute top-2 left-2 px-3 py-1 bg-white/90 backdrop-blur-sm text-gray-600 rounded-full text-[10px] font-black border border-gray-200 shadow-sm uppercase tracking-tighter">
+                                        {selectedChannel !== 'TODOS' ? selectedChannel : (product.channel.includes(',') ? 'MULTICANAL' : product.channel)}
+                                    </div>
                                 )}
                                 {/* Stock Badge */}
                                 <div className={`absolute top-2 right-2 px-3 py-1 rounded-full text-xs font-bold shadow-sm ${product.stock > 0 ? 'bg-white text-coca-red' : 'bg-gray-100 text-gray-500 border border-gray-200'}`}>
@@ -649,6 +678,11 @@ export default function Catalog() {
                                                 <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover opacity-80" />
                                             ) : (
                                                 <Package size={48} className="text-gray-300" />
+                                            )}
+                                            {product.channel && (
+                                                <div className="absolute top-2 left-2 px-3 py-1 bg-white/90 backdrop-blur-sm text-gray-400 rounded-full text-[10px] font-black border border-gray-200 shadow-sm uppercase tracking-tighter">
+                                                    {selectedChannel !== 'TODOS' ? selectedChannel : (product.channel.includes(',') ? 'MULTICANAL' : product.channel)}
+                                                </div>
                                             )}
                                             <div className="absolute top-2 right-2 px-3 py-1 rounded-full text-xs font-bold shadow-sm bg-gray-200 text-gray-600 border border-gray-300">
                                                 Agotado (Stock: {product.stock})

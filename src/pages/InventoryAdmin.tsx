@@ -211,21 +211,28 @@ export default function InventoryAdmin() {
             console.log('API responded', { productsData, requestsData });
             setAllProducts(productsData);
 
-            // Group products by code + channel
+            // Group products by code ONLY
             const aggregatedMap = new Map<string, Product>();
             productsData.forEach((p) => {
                 if (!p.code) {
                     console.warn('Product missing code:', p);
                     return;
                 }
+                const codeKey = p.code.trim().toLowerCase();
                 const channel = (p.channel || '').trim();
-                const codeKey = `${p.code.trim().toLowerCase()}|${channel.toLowerCase()}`;
 
-                if (!codeKey) return;
                 if (aggregatedMap.has(codeKey)) {
                     const existing = aggregatedMap.get(codeKey)!;
                     existing.stock += p.stock;
                     if (!existing.imageUrl && p.imageUrl) existing.imageUrl = p.imageUrl;
+                    
+                    // Acumular canales únicos
+                    if (channel) {
+                        const currentChannels = (existing.channel || '').split(',').map(c => c.trim()).filter(Boolean);
+                        if (!currentChannels.includes(channel)) {
+                            existing.channel = [...currentChannels, channel].join(', ');
+                        }
+                    }
                 } else {
                     aggregatedMap.set(codeKey, { ...p });
                 }
@@ -552,12 +559,15 @@ export default function InventoryAdmin() {
             const pastEntries = allProducts.filter(p => p.code.toLowerCase() === newCode.toLowerCase() && p.stock > 0 && p.details);
             const lastLocation = pastEntries.length > 0 ? [...pastEntries].sort((a, b) => new Date(a.entryDate || 0).getTime() - new Date(b.entryDate || 0).getTime()).pop()?.details : '';
 
+            // Si el producto existe y tiene múltiples canales, tomamos el primero por defecto para el nuevo ingreso
+            const firstChannel = (matched.channel || '').split(',')[0].trim();
+
             setFormData(prev => ({
                 ...prev,
                 code: newCode,
                 name: matched.name,
                 description: matched.description,
-                channel: matched.channel || prev.channel,
+                channel: firstChannel || prev.channel,
                 imageUrl: matched.imageUrl || prev.imageUrl,
                 details: formMode === 'ingreso' ? (lastLocation || prev.details) : prev.details
             }));
@@ -603,8 +613,8 @@ export default function InventoryAdmin() {
     const handleChannelChange = (val: string) => {
         setFormData(prev => ({ ...prev, channel: val }));
         const existingProduct = products.find(p => p.code.toLowerCase() === formData.code?.toLowerCase());
-        if (existingProduct && existingProduct.channel && existingProduct.channel !== val) {
-            setChannelWarning(`Nota: Este código está asociado al canal "${existingProduct.channel}".`);
+        if (existingProduct && existingProduct.channel && !existingProduct.channel.includes(val)) {
+            setChannelWarning(`Nota: Este código ya está registrado en canal(es): "${existingProduct.channel}". Estás añadiendo un nuevo canal o cambiando el actual.`);
         } else {
             setChannelWarning('');
         }
@@ -961,8 +971,26 @@ export default function InventoryAdmin() {
                                                                 </div>
                                                                 <p className="font-bold text-gray-900 text-base leading-tight">{formData.name}</p>
                                                             </div>
-                                                            <div className="pl-2 sm:pl-0 flex items-center gap-2">
-                                                                {formData.channel && <span className="inline-block text-[10px] bg-white text-gray-600 px-2 py-0.5 rounded border border-gray-200 font-bold uppercase tracking-wider shadow-sm">{formData.channel}</span>}
+                                                            <div className="pl-2 sm:pl-0 flex flex-col sm:items-end gap-1.5 min-w-[140px]">
+                                                                <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">Canal de este ingreso</label>
+                                                                {formMode === 'ingreso' ? (
+                                                                    <div className="relative w-full">
+                                                                        <select
+                                                                            className="w-full pl-3 pr-8 py-1.5 bg-white border border-gray-200 rounded-lg text-[11px] font-black uppercase tracking-tight outline-none focus:ring-2 focus:ring-coca-red/20 focus:border-coca-red transition-all appearance-none"
+                                                                            value={formData.channel || ''}
+                                                                            onChange={e => handleChannelChange(e.target.value)}
+                                                                            required
+                                                                        >
+                                                                            <option value="" disabled>Elegir...</option>
+                                                                            {ALL_CHANNELS.map(ch => (
+                                                                                <option key={ch} value={ch}>{ch}</option>
+                                                                            ))}
+                                                                        </select>
+                                                                        <ChevronDown size={12} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+                                                                    </div>
+                                                                ) : (
+                                                                    formData.channel && <span className="inline-block text-[10px] bg-white text-gray-600 px-2 py-0.5 rounded border border-gray-200 font-bold uppercase tracking-wider shadow-sm">{formData.channel}</span>
+                                                                )}
                                                             </div>
                                                         </div>
 
