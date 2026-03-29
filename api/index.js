@@ -112,8 +112,14 @@ app.post('/api/products', async (req, res) => {
             imageUrl
         });
     } catch (error) {
-        console.error('Error adding product:', error);
-        res.status(500).json({ success: false, error: 'Failed to process request' });
+        console.error('CRITICAL: Error adding product to Sheets:', error.message);
+        if (error.response) {
+            console.error('Sheets API Error Details:', error.response.data);
+        }
+        res.status(500).json({ 
+            success: false, 
+            error: 'Failed to process request: ' + (error.response?.data?.error?.message || error.message) 
+        });
     }
 });
 

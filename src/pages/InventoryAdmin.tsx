@@ -697,8 +697,8 @@ export default function InventoryAdmin() {
 
                 if (res && res.id) createdIds.push(res.id);
 
-                // Retraso de seguridad para que Sheets pueda insertar la fila correctamente sin colisiones
-                if (itemsToSave.length > 1) await new Promise(res => setTimeout(res, 500));
+                // Retraso de seguridad aumentado para evitar colisiones en Google Sheets en ráfagas de ingreso
+                if (itemsToSave.length > 1) await new Promise(res => setTimeout(res, 1000));
             }
             setLastActionIds(createdIds);
 
@@ -735,9 +735,10 @@ export default function InventoryAdmin() {
                 setSuccessMsg('');
                 setLastActionIds([]);
             }, 10000); // 10 seconds total visibility
-        } catch (err) {
+        } catch (err: any) {
             console.error(err);
-            showError("Hubo un error al guardar el producto. Revisa la consola.");
+            const errorMsg = err.response?.data?.error || err.message || "Error desconocido";
+            showError(`Error al guardar producto: ${errorMsg}. Por favor, vuelve a intentarlo.`);
         } finally {
             setIsSaving(false);
             setFormMode('none');

@@ -48,7 +48,7 @@ export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
                         <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold tracking-widest uppercase border border-white/30 backdrop-blur-sm">
                             Nuevo
                         </span>
-                        <h2 className="text-2xl font-black tracking-tight">Version 1.1.0</h2>
+                        <h2 className="text-2xl font-black tracking-tight">Version 1.1.1</h2>
                     </div>
                     <p className="text-white/80 text-sm font-medium">
                         Hemos actualizado el sistema para mejorar la gestión de inventario multicanal.
