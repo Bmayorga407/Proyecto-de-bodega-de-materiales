@@ -861,14 +861,26 @@ export default function ProductDetails() {
                             </div>
                             <div className="md:col-span-2">
                                 <label className="block text-xs font-semibold text-gray-600 mb-1">Canal</label>
-                                <select className="w-full px-3 py-2 border rounded-lg focus:ring-1 focus:ring-coca-red outline-none text-sm appearance-none bg-white"
-                                    value={formData.channel || ''} onChange={e => setFormData({ ...formData, channel: e.target.value })}>
-                                    <option value="" disabled>Sin canal</option>
-                                    <option value="Venta Hogar">Venta Hogar</option>
-                                    <option value="Publicidad">Publicidad</option>
-                                    <option value="Tradicional">Tradicional</option>
-                                    <option value="Moderno">Moderno</option>
-                                </select>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {['Tradicional', 'Moderno', 'Venta Hogar', 'Publicidad'].map(ch => {
+                                        const isSelected = (formData.channel || '').split(',').map(c => c.trim()).includes(ch);
+                                        return (
+                                            <button
+                                                key={ch}
+                                                type="button"
+                                                onClick={() => {
+                                                    let current = (formData.channel || '').split(',').map(c => c.trim()).filter(Boolean);
+                                                    if (current.includes(ch)) current = current.filter(c => c !== ch);
+                                                    else current.push(ch);
+                                                    setFormData({ ...formData, channel: current.join(', ') });
+                                                }}
+                                                className={`text-[11px] px-2.5 py-1.5 rounded-md border font-bold transition-colors ${isSelected ? 'bg-red-50 text-coca-red border-coca-red ring-1 ring-red-500/20' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'}`}
+                                            >
+                                                {ch}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                             </div>
                         </div>
 
