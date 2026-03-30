@@ -113,7 +113,7 @@ export const Layout = () => {
                         className="group flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-all active:scale-95 border border-gray-200"
                     >
                         <Info size={12} className="text-gray-400 group-hover:text-coca-red transition-colors" />
-                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Version 1.1.1</span>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Version 1.1.2</span>
                         <span className="w-1.5 h-1.5 bg-coca-red rounded-full animate-pulse shadow-[0_0_8px_rgba(238,28,46,0.5)]"></span>
                     </button>
                 </div>

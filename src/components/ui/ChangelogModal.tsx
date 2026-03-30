@@ -1,4 +1,4 @@
-import { X, CheckCircle2, Package, Layers, MousePointer2, AlertCircle } from 'lucide-react';
+import { X, CheckCircle2, Package, Layers, MousePointer2, AlertCircle, ListChecks } from 'lucide-react';
 
 interface ChangelogModalProps {
     onClose: () => void;
@@ -6,6 +6,11 @@ interface ChangelogModalProps {
 
 export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
     const improvements = [
+        {
+            title: "Selección Múltiple de Canales",
+            description: "Al registrar un ingreso, ahora puedes seleccionar múltiples canales a la vez utilizando el nuevo selector, evitando crear registros duplicados y agilizando el proceso.",
+            icon: <ListChecks className="text-teal-500" size={20} />
+        },
         {
             title: "Soporte Multicanal",
             description: "Ahora los productos pueden pertenecer a múltiples canales (Tradicional, Moderno, etc.) simultáneamente.",
@@ -48,7 +53,7 @@ export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
                         <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold tracking-widest uppercase border border-white/30 backdrop-blur-sm">
                             Nuevo
                         </span>
-                        <h2 className="text-2xl font-black tracking-tight">Version 1.1.1</h2>
+                        <h2 className="text-2xl font-black tracking-tight">Version 1.1.2</h2>
                     </div>
                     <p className="text-white/80 text-sm font-medium">
                         Hemos actualizado el sistema para mejorar la gestión de inventario multicanal.
