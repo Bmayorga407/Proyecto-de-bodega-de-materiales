@@ -5,6 +5,7 @@ import { OrderRequest, Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
 import { useAdminCart } from '../context/AdminCartContext';
+import { createPortal } from 'react-dom';
 
 const getLocalDateString = () => {
     const d = new Date();
@@ -89,7 +90,7 @@ export default function InventoryAdmin() {
                         const pChannel = (p.channel || '').trim().toUpperCase();
                         // Filtrar por código y canal exacto, con stock positivo
                         return pCode === targetCode &&
-                            (!targetChannel || pChannel === targetChannel) &&
+                            (!targetChannel || pChannel.split(',').map(c=>c.trim()).includes(targetChannel)) &&
                             Number(p.stock) > 0;
                     }).sort((a, b) => Number(a.stock) - Number(b.stock)); // FIFO aproximado (o menor stock primero)
 
@@ -169,8 +170,13 @@ export default function InventoryAdmin() {
     const filteredProducts = useMemo(() => {
         // Si todos están seleccionados, mostrar todo (incluso sin canal)
         if (selectedChannels.length === ALL_CHANNELS.length) return products;
-        // Si hay un filtro activo, solo mostrar coincidencias exactas y ocultar los vacíos
-        return products.filter(p => p.channel && selectedChannels.includes(p.channel));
+        // Si hay un filtro activo, solo mostrar coincidencias si el producto pertenece a al menos uno de los seleccionados
+        return products.filter(p => {
+            if (!p.channel) return false;
+            const pChannels = p.channel.split(',').map(c => c.trim().toLowerCase());
+            const selectedChannelsLower = selectedChannels.map(c => c.toLowerCase());
+            return pChannels.some(c => selectedChannelsLower.includes(c));
+        });
     }, [products, selectedChannels]);
 
     const activeProducts = useMemo(() => {
@@ -191,9 +197,9 @@ export default function InventoryAdmin() {
     });
     const [conflictData, setConflictData] = useState<{ existing: Product, submitted: Partial<Product> } | null>(null);
     const [requestConfirm, setRequestConfirm] = useState<{ req: OrderRequest, status: OrderRequest['status'] } | null>(null);
-    const [requestLocations, setRequestLocations] = useState<{ location: string, quantity: number }[]>([]);
+    const [requestLocations, setRequestLocations] = useState<{ location: string, quantity: number, channel?: string }[]>([]);
     const [bulkApprovalQueue, setBulkApprovalQueue] = useState<OrderRequest[]>([]);
-    const [manualLocations, setManualLocations] = useState<{ location: string, quantity: number }[]>([]);
+    const [manualLocations, setManualLocations] = useState<{ location: string, quantity: number, channel?: string }[]>([]);
 
     const showError = (msg: string) => {
         setErrorMsg(msg);
@@ -304,6 +310,27 @@ export default function InventoryAdmin() {
         loadData();
     }, []);
 
+    // Polling: refrescar solicitudes cada 25 segundos para que bodega vea nuevas solicitudes de ventas
+    useEffect(() => {
+        const pollRequests = async () => {
+            try {
+                const requestsData = await inventoryService.fetchRequests();
+                const sortedRequests = requestsData.sort((a: any, b: any) => {
+                    if (a.status === 'PENDIENTE' && b.status !== 'PENDIENTE') return -1;
+                    if (b.status === 'PENDIENTE' && a.status !== 'PENDIENTE') return 1;
+                    return new Date(b.dateRequested).getTime() - new Date(a.dateRequested).getTime();
+                });
+                setRequests(sortedRequests);
+            } catch (_) { /* silencioso */ }
+        };
+        const interval = setInterval(pollRequests, 25000);
+        document.addEventListener('requests-updated', pollRequests);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('requests-updated', pollRequests);
+        };
+    }, []);
+
     // Efecto para expandir y resaltar la solicitud que viene desde movimientos
     useEffect(() => {
         if (!highlightReqId || requests.length === 0) return;
@@ -336,11 +363,19 @@ export default function InventoryAdmin() {
 
     }, [highlightReqId, requests]);
 
-    const getAvailableStockInLocation = (code: string, location: string, excludeRequestId?: string): number => {
+    const getAvailableStockInLocation = (code: string, location: string, excludeRequestId?: string, channelFilter?: string): number => {
         const locationStock: Record<string, number> = {};
         let unallocatedNeg = 0;
 
-        const productHistory = allProducts.filter(p => (p.code || '').toLowerCase() === code.toLowerCase());
+        const productHistory = allProducts.filter(p => {
+            if ((p.code || '').toLowerCase() !== code.toLowerCase()) return false;
+            if (channelFilter) {
+                const c = (p.channel || '').trim();
+                // Si el registro de la BD tiene canal, debe coincidir (o estar incluido si era de los viejos guardados con comas)
+                if (c && !c.split(',').map(s=>s.trim()).includes(channelFilter)) return false;
+            }
+            return true;
+        });
 
         let pendingRequestsStock = 0;
         requests.forEach(r => {
@@ -382,7 +417,7 @@ export default function InventoryAdmin() {
         return locationStock[location] || 0;
     };
 
-    const handleUpdateReqStatus = async (req: OrderRequest, status: OrderRequest['status'], locations?: { location: string, quantity: number }[]) => {
+    const handleUpdateReqStatus = async (req: OrderRequest, status: OrderRequest['status'], locations?: { location: string, quantity: number, channel?: string }[]) => {
         let finalQuantity = req.quantity;
 
         // Validation for APROBADA: check stock availability before reserving
@@ -399,7 +434,7 @@ export default function InventoryAdmin() {
             finalQuantity = totalQty;
 
             for (const item of locations) {
-                const availableInLocation = getAvailableStockInLocation(req.productCode, item.location, req.id);
+                const availableInLocation = getAvailableStockInLocation(req.productCode, item.location, req.id, item.channel);
                 if (availableInLocation < item.quantity) {
                     showError(`Error: No puedes reservar ${item.quantity} UN. La ubicación "${item.location}" solo cuenta con ${availableInLocation} UN.`);
                     return;
@@ -422,10 +457,11 @@ export default function InventoryAdmin() {
             if (status === 'APROBADA') {
                 if (locations && locations.length > 0) {
                     for (const item of locations) {
-                        // Find any product entry that matches the cleaned location
+                        // Find any product entry that matches the cleaned location and channel
                         const originalProduct = allProducts.find(p =>
                             p.code.toLowerCase() === req.productCode.toLowerCase() &&
                             getCleanLocation(p.details) === item.location &&
+                            (!item.channel || (p.channel || '').includes(item.channel)) &&
                             p.stock > 0
                         );
                         await inventoryService.addProduct({
@@ -434,7 +470,7 @@ export default function InventoryAdmin() {
                             description: req.productName,
                             stock: -Math.abs(item.quantity),
                             details: `[${item.location}] Receptor: ${req.receptorName || req.requestedBy.split('@')[0]} ||REQ:${req.id}`,
-                            channel: originalProduct?.channel || '',
+                            channel: item.channel || originalProduct?.channel || '',
                             imageUrl: originalProduct?.imageUrl || '',
                             entryDate: new Date().toISOString().split('T')[0],
                             registeredBy: `Solicitud aprobada para: ${req.requestedBy.split('@')[0]}`
@@ -824,8 +860,8 @@ export default function InventoryAdmin() {
             )}
 
             {/* Saving Overlay */}
-            {isSaving && (
-                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200">
+            {isSaving && createPortal(
+                <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[9999] flex items-center justify-center animate-in fade-in duration-200">
                     <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center gap-4 animate-in zoom-in-95 duration-300">
                         <div className="relative">
                             <div className="w-16 h-16 border-4 border-gray-100 rounded-full"></div>
@@ -833,7 +869,8 @@ export default function InventoryAdmin() {
                         </div>
                         <p className="font-black text-gray-900 uppercase tracking-widest text-sm">Procesando Registro...</p>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* Mobile Header */}
@@ -884,9 +921,18 @@ export default function InventoryAdmin() {
                                 const locs = new Set<string>();
                                 const exitLocs = new Set<string>();
                                 allProducts.forEach(p => {
-                                    if (p.code.toLowerCase() === formData.code?.toLowerCase() && p.details && p.details.trim() !== '' && p.stock > 0) {
-                                        locs.add(p.details.trim());
-                                        exitLocs.add(p.details.trim());
+                                    if (p.code.toLowerCase() === formData.code?.toLowerCase() && Number(p.stock) > 0) {
+                                        // Normalizar ubicación: si está vacío o es mala, usar 'Sin ubicación'
+                                        const rawLoc = p.details ? getCleanLocation(p.details) : '';
+                                        const isBadLoc = !rawLoc
+                                            || rawLoc.toLowerCase().includes('por definir')
+                                            || rawLoc.toLowerCase().includes('baja')
+                                            || rawLoc.toLowerCase().includes('entrega')
+                                            || rawLoc.toLowerCase().includes('receptor');
+                                        const loc = isBadLoc ? 'Sin ubicación' : rawLoc;
+                                        locs.add(loc);
+                                        const locWithChannel = `${p.channel || ''}|||${loc}`;
+                                        exitLocs.add(locWithChannel);
                                     }
                                 });
                                 pastLocations = Array.from(locs);
@@ -982,16 +1028,13 @@ export default function InventoryAdmin() {
                                                                 {formMode === 'ingreso' ? (
                                                                     <div className="flex flex-wrap gap-1 w-full justify-end sm:justify-end">
                                                                         {ALL_CHANNELS.map(ch => {
-                                                                            const isSelected = (formData.channel || '').split(',').map(c => c.trim()).includes(ch);
+                                                                            const isSelected = (formData.channel || '').trim() === ch;
                                                                             return (
                                                                                 <button
                                                                                     key={ch}
                                                                                     type="button"
                                                                                     onClick={() => {
-                                                                                        let current = (formData.channel || '').split(',').map(c => c.trim()).filter(Boolean);
-                                                                                        if (current.includes(ch)) current = current.filter(c => c !== ch);
-                                                                                        else current.push(ch);
-                                                                                        handleChannelChange(current.join(', '));
+                                                                                        handleChannelChange(ch);
                                                                                     }}
                                                                                     className={`text-[9px] px-2 py-1 rounded border font-bold uppercase transition-colors ${isSelected ? 'bg-coca-red text-white border-coca-red' : 'bg-gray-50 text-gray-500 border-gray-200 hover:bg-gray-100'}`}
                                                                                 >
@@ -1062,7 +1105,7 @@ export default function InventoryAdmin() {
                                                                 </label>
                                                                 <div className="flex flex-wrap gap-2">
                                                                     {ALL_CHANNELS.map(ch => {
-                                                                        const isSelected = (formData.channel || '').split(',').map(c => c.trim()).includes(ch);
+                                                                        const isSelected = (formData.channel || '').trim() === ch;
                                                                         return (
                                                                             <button
                                                                                 key={ch}
@@ -1070,10 +1113,7 @@ export default function InventoryAdmin() {
                                                                                 disabled={formMode === 'salida'}
                                                                                 onClick={() => {
                                                                                     if (formMode === 'salida') return;
-                                                                                    let current = (formData.channel || '').split(',').map(c => c.trim()).filter(Boolean);
-                                                                                    if (current.includes(ch)) current = current.filter(c => c !== ch);
-                                                                                    else current.push(ch);
-                                                                                    handleChannelChange(current.join(', '));
+                                                                                    handleChannelChange(ch);
                                                                                 }}
                                                                                 className={`text-xs px-3 py-2 rounded-lg border-2 font-bold transition-colors ${isSelected ? 'bg-red-50 text-coca-red border-coca-red ring-1 ring-red-500/20' : 'bg-white text-gray-500 border-gray-200 hover:bg-gray-50'} ${formMode === 'salida' ? 'opacity-60 cursor-not-allowed' : ''}`}
                                                                             >
@@ -1172,15 +1212,17 @@ export default function InventoryAdmin() {
                                             </div>
 
                                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                                                {availableLocationsForSalida.map(loc => {
-                                                    const maxAvailable = getAvailableStockInLocation(formData.code || '', loc);
-                                                    const currentQty = manualLocations.find(m => m.location === loc)?.quantity || 0;
+                                                {availableLocationsForSalida.map(locKey => {
+                                                    const [ch, loc] = locKey.split('|||');
+                                                    const maxAvailable = getAvailableStockInLocation(formData.code || '', loc, undefined, ch);
+                                                    const currentQty = manualLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
                                                     const totalSelected = manualLocations.reduce((acc, curr) => acc + curr.quantity, 0);
                                                     const canAdd = currentQty < maxAvailable && totalSelected < (formData.stock || 0);
 
                                                     return (
-                                                        <div key={loc} className={`bg-white border rounded-xl p-3 shadow-sm flex flex-col justify-between transition-colors ${currentQty > 0 ? 'border-red-400 ring-1 ring-red-400/20' : 'border-red-200'}`}>
+                                                        <div key={locKey} className={`bg-white border rounded-xl p-3 shadow-sm flex flex-col justify-between transition-colors ${currentQty > 0 ? 'border-red-400 ring-1 ring-red-400/20' : 'border-red-200'}`}>
                                                             <div className="mb-3">
+                                                                <div className="text-[10px] font-black uppercase text-coca-red tracking-widest bg-red-50 inline-block px-1.5 py-0.5 rounded mb-1 border border-red-100">{ch || 'Sin Canal'}</div>
                                                                 <div className="text-sm font-bold text-gray-800 truncate" title={loc}>{loc}</div>
                                                                 <div className="text-xs text-gray-500 font-medium mt-0.5">Stock local: <span className="text-gray-700 font-bold">{maxAvailable}</span></div>
                                                             </div>
@@ -1191,7 +1233,7 @@ export default function InventoryAdmin() {
                                                                     disabled={currentQty === 0}
                                                                     onClick={() => {
                                                                         const newArr = [...manualLocations];
-                                                                        const idx = newArr.findIndex(m => m.location === loc);
+                                                                        const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                         if (idx >= 0) {
                                                                             if (newArr[idx].quantity > 1) {
                                                                                 newArr[idx].quantity -= 1;
@@ -1213,11 +1255,11 @@ export default function InventoryAdmin() {
                                                                     disabled={!canAdd}
                                                                     onClick={() => {
                                                                         const newArr = [...manualLocations];
-                                                                        const idx = newArr.findIndex(m => m.location === loc);
+                                                                        const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                         if (idx >= 0) {
                                                                             newArr[idx].quantity += 1;
                                                                         } else {
-                                                                            newArr.push({ location: loc, quantity: 1 });
+                                                                            newArr.push({ location: loc, quantity: 1, channel: ch });
                                                                         }
                                                                         setManualLocations(newArr);
                                                                     }}
@@ -1230,18 +1272,18 @@ export default function InventoryAdmin() {
                                                                     type="button"
                                                                     onClick={() => {
                                                                         const currentTotal = manualLocations.reduce((s, i) => s + i.quantity, 0);
-                                                                        const currentInLoc = manualLocations.find(m => m.location === loc)?.quantity || 0;
+                                                                        const currentInLoc = manualLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
                                                                         const needed = (formData.stock || 0) - currentTotal;
                                                                         const availableInLoc = maxAvailable - currentInLoc;
                                                                         const toAdd = Math.min(needed, availableInLoc);
 
                                                                         if (toAdd > 0) {
                                                                             const newArr = [...manualLocations];
-                                                                            const idx = newArr.findIndex(m => m.location === loc);
+                                                                            const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                             if (idx >= 0) {
                                                                                 newArr[idx].quantity += toAdd;
                                                                             } else {
-                                                                                newArr.push({ location: loc, quantity: toAdd });
+                                                                                newArr.push({ location: loc, quantity: toAdd, channel: ch });
                                                                             }
                                                                             setManualLocations(newArr);
                                                                         }
@@ -1987,10 +2029,9 @@ export default function InventoryAdmin() {
                         </div>
                     </div>
                 )}
-                {/* Modal de Resolución de Conflictos */}
                 {
-                    conflictData && (
-                        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    conflictData && createPortal(
+                        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                                 <div className="bg-amber-50 p-5 border-b border-amber-100 flex items-start gap-4">
                                     <div className="bg-amber-100 p-2 rounded-full text-amber-600">
@@ -2049,7 +2090,8 @@ export default function InventoryAdmin() {
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                        </div>,
+                        document.body
                     )
                 }
 
@@ -2098,8 +2140,8 @@ export default function InventoryAdmin() {
                 )}
 
                 {/* Modal de Salida Masiva */}
-                {showBulkModal && (
-                    <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
+                {showBulkModal && createPortal(
+                    <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-200">
                         <div className="bg-white rounded-3xl shadow-2xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                             <div className={`p-6 border-b flex items-center justify-between ${bulkType === 'BAJA' ? 'bg-amber-50 border-amber-100' : 'bg-green-50 border-green-100'}`}>
                                 <div className="flex items-center gap-3">
@@ -2249,14 +2291,15 @@ export default function InventoryAdmin() {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </div>,
+                    document.body
                 )}
 
 
                 {/* Modal de Confirmación de Solicitudes */}
                 {
-                    requestConfirm && (
-                        <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
+                    requestConfirm && createPortal(
+                        <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4 backdrop-blur-sm">
                             <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                                 <div className={`p-5 flex items-start gap-4 border-b ${requestConfirm.status === 'APROBADA' ? 'bg-blue-50 border-blue-100' :
                                     requestConfirm.status === 'RECHAZADA' ? 'bg-red-50 border-red-100' :
@@ -2296,8 +2339,17 @@ export default function InventoryAdmin() {
                                     {requestConfirm.status === 'APROBADA' && (() => {
                                         const locs = new Set<string>();
                                         allProducts.forEach(p => {
-                                            if ((p.code || '').toLowerCase() === requestConfirm.req.productCode.toLowerCase() && p.details && Number(p.stock) > 0) {
-                                                locs.add(getCleanLocation(p.details));
+                                            if ((p.code || '').toLowerCase() === requestConfirm.req.productCode.toLowerCase() && Number(p.stock) > 0) {
+                                                // Normalizar ubicación igual que getAvailableStockInLocation
+                                                const rawLoc = getCleanLocation(p.details);
+                                                const isBadLoc = !rawLoc
+                                                    || rawLoc.toLowerCase().includes('por definir')
+                                                    || rawLoc.toLowerCase().includes('baja')
+                                                    || rawLoc.toLowerCase().includes('entrega')
+                                                    || rawLoc.toLowerCase().includes('receptor');
+                                                const loc = isBadLoc ? 'Sin ubicación' : rawLoc;
+                                                const locWithChannel = `${p.channel || ''}|||${loc}`;
+                                                locs.add(locWithChannel);
                                             }
                                         });
                                         const availableLocs = Array.from(locs);
@@ -2314,15 +2366,17 @@ export default function InventoryAdmin() {
                                                 </div>
 
                                                 <div className="space-y-3">
-                                                    {availableLocs.map(loc => {
-                                                        const maxAvailable = getAvailableStockInLocation(requestConfirm.req.productCode, loc, requestConfirm.req.id);
-                                                        const currentQty = requestLocations.find(m => m.location === loc)?.quantity || 0;
+                                                    {availableLocs.map(locKey => {
+                                                        const [ch, loc] = locKey.split('|||');
+                                                        const maxAvailable = getAvailableStockInLocation(requestConfirm.req.productCode, loc, requestConfirm.req.id, ch);
+                                                        const currentQty = requestLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
                                                         const totalSelected = requestLocations.reduce((s, i) => s + i.quantity, 0);
                                                         const canAdd = currentQty < maxAvailable && totalSelected < requestConfirm.req.quantity;
 
                                                         return (
-                                                            <div key={loc} className={`bg-white border rounded-xl p-3 shadow-sm flex items-center justify-between transition-colors ${currentQty > 0 ? 'border-blue-400 ring-1 ring-blue-400/20' : 'border-blue-200'}`}>
+                                                            <div key={locKey} className={`bg-white border rounded-xl p-3 shadow-sm flex items-center justify-between transition-colors ${currentQty > 0 ? 'border-blue-400 ring-1 ring-blue-400/20' : 'border-blue-200'}`}>
                                                                 <div className="flex-1 min-w-0 pr-3">
+                                                                    <div className="text-[10px] font-black uppercase text-blue-600 tracking-widest bg-blue-50 inline-block px-1.5 py-0.5 rounded mb-1 border border-blue-100">{ch || 'Sin Canal'}</div>
                                                                     <div className="text-sm font-bold text-gray-800 line-clamp-1 truncate" title={loc}>{loc}</div>
                                                                     <div className="text-xs text-gray-500 font-medium mt-0.5">Stock local: <span className="text-gray-700 font-bold">{maxAvailable}</span></div>
                                                                 </div>
@@ -2333,7 +2387,7 @@ export default function InventoryAdmin() {
                                                                         disabled={currentQty === 0}
                                                                         onClick={() => {
                                                                             const newArr = [...requestLocations];
-                                                                            const idx = newArr.findIndex(m => m.location === loc);
+                                                                            const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                             if (idx >= 0) {
                                                                                 if (newArr[idx].quantity > 1) {
                                                                                     newArr[idx].quantity -= 1;
@@ -2355,11 +2409,11 @@ export default function InventoryAdmin() {
                                                                         disabled={!canAdd}
                                                                         onClick={() => {
                                                                             const newArr = [...requestLocations];
-                                                                            const idx = newArr.findIndex(m => m.location === loc);
+                                                                            const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                             if (idx >= 0) {
                                                                                 newArr[idx].quantity += 1;
                                                                             } else {
-                                                                                newArr.push({ location: loc, quantity: 1 });
+                                                                                newArr.push({ location: loc, quantity: 1, channel: ch });
                                                                             }
                                                                             setRequestLocations(newArr);
                                                                         }}
@@ -2372,17 +2426,17 @@ export default function InventoryAdmin() {
                                                                         type="button"
                                                                         onClick={() => {
                                                                             const currentTotal = requestLocations.reduce((s, i) => s + i.quantity, 0);
-                                                                            const currentInLoc = requestLocations.find(m => m.location === loc)?.quantity || 0;
+                                                                            const currentInLoc = requestLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
                                                                             const needed = requestConfirm.req.quantity - currentTotal;
                                                                             const availableInLoc = maxAvailable - currentInLoc;
                                                                             const toAdd = Math.min(needed, availableInLoc);
                                                                             if (toAdd > 0) {
                                                                                 const newArr = [...requestLocations];
-                                                                                const idx = newArr.findIndex(m => m.location === loc);
+                                                                                const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
                                                                                 if (idx >= 0) {
                                                                                     newArr[idx].quantity += toAdd;
                                                                                 } else {
-                                                                                    newArr.push({ location: loc, quantity: toAdd });
+                                                                                    newArr.push({ location: loc, quantity: toAdd, channel: ch });
                                                                                 }
                                                                                 setRequestLocations(newArr);
                                                                             }
@@ -2444,15 +2498,16 @@ export default function InventoryAdmin() {
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        </div>,
+                        document.body
                     )
                 }
 
                 {/* Delete Confirmation Modal */}
                 {
-                    deleteConfirm && (
-                        <div className="fixed inset-0 z-[60] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
-                            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-gray-100">
+                    deleteConfirm && createPortal(
+                        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm">
+                            <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95 duration-200 border border-gray-100">
                                 <div className="p-6">
                                     <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mb-4 mx-auto">
                                         <Trash2 size={24} />
@@ -2495,11 +2550,11 @@ export default function InventoryAdmin() {
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                        </div>,
+                        document.body
                     )
                 }
-
-            </div >
-        </div >
+            </div>
+        </div>
     );
 }

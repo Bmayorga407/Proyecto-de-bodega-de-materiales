@@ -4,6 +4,7 @@ import { Search, Package, Loader2, History, X, Clock, CheckCircle2, XCircle, Use
 import { Product, OrderRequest } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
+import { createPortal } from 'react-dom';
 
 const formatDisplayName = (emailStr: string | undefined): string => {
     if (!emailStr) return 'Bodega (Anterior)';
@@ -46,19 +47,21 @@ export default function Catalog() {
     const [searchTerm, setSearchTerm] = useState('');
     const [selectedChannel, setSelectedChannel] = useState<'TODOS' | 'TRADICIONAL' | 'MODERNO'>('TODOS');
     const [sortNewestFirst, setSortNewestFirst] = useState(true);
-    const [products, setProducts] = useState<Product[]>([]);
+
     const [myRequests, setMyRequests] = useState<OrderRequest[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showArchived, setShowArchived] = useState(false);
     const [showHistory, setShowHistory] = useState(false);
     const [requestConfirmCancel, setRequestConfirmCancel] = useState<OrderRequest | null>(null);
-    const [modifyQuantity, setModifyQuantity] = useState<number>(1);
+    const [modifyQuantity, setModifyQuantity] = useState<number | "">(1);
     const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
     const handleOpenModifyModal = (req: OrderRequest) => {
         setRequestConfirmCancel(req);
         setModifyQuantity(req.quantity);
     };
+
+    const [rawProducts, setRawProducts] = useState<Product[]>([]);
 
     useEffect(() => {
         const loadData = async () => {
@@ -68,44 +71,11 @@ export default function Catalog() {
                     inventoryService.fetchRequests()
                 ]);
 
-                // Agrupar productos con el mismo código y sumar su stock
-                const aggregatedMap = new Map<string, Product>();
-
-                productData.forEach((p) => {
-                    if (!p.code) return; // Saltamos productos sin código válido
-
-                    const codeKey = p.code.trim().toLowerCase();
-                    const channel = (p.channel || '').trim();
-
-                    if (aggregatedMap.has(codeKey)) {
-                        const existing = aggregatedMap.get(codeKey)!;
-                        existing.stock += p.stock;
-
-                        // Si el antiguo no tenía foto y este sí, actualizamos
-                        if (!existing.imageUrl && p.imageUrl) {
-                            existing.imageUrl = p.imageUrl;
-                        }
-
-                        // Acumular canales únicos (usando un separador)
-                        if (channel) {
-                            const currentChannels = (existing.channel || '').split(',').map(c => c.trim()).filter(Boolean);
-                            if (!currentChannels.includes(channel)) {
-                                existing.channel = [...currentChannels, channel].join(', ');
-                            }
-                        }
-                    } else {
-                        aggregatedMap.set(codeKey, { ...p });
-                    }
-                });
-
-                let finalProducts = Array.from(aggregatedMap.values());
-
-                // Restricción para Logística: Ver sólo Venta Hogar
+                let finalRawProducts = productData;
                 if (role === 'LOGISTICA') {
-                    finalProducts = finalProducts.filter(p => (p.channel || '').toLowerCase().includes('ventahogar'));
+                    finalRawProducts = finalRawProducts.filter(p => (p.channel || '').toLowerCase().includes('ventahogar'));
                 }
-
-                setProducts(finalProducts);
+                setRawProducts(finalRawProducts);
 
                 // Filter requests for this user, sorted by newest first
                 if (currentUser) {
@@ -122,7 +92,66 @@ export default function Catalog() {
             }
         };
         loadData();
+    }, [currentUser, role]);
+
+    // Polling: refrescar solo las solicitudes del usuario cada 20 segundos para mostrar cambios de estado
+    useEffect(() => {
+        if (!currentUser) return;
+        const pollRequests = async () => {
+            try {
+                const requestData = await inventoryService.fetchRequests();
+                const userReqs = requestData
+                    .filter((r: OrderRequest) => r.requesterEmail === currentUser.email || r.requestedBy === currentUser.email)
+                    .sort((a: OrderRequest, b: OrderRequest) => new Date(b.dateRequested).getTime() - new Date(a.dateRequested).getTime());
+                setMyRequests(userReqs);
+            } catch (_) { /* silencioso */ }
+        };
+        const interval = setInterval(pollRequests, 20000);
+        // También escuchar el evento manual para recarga inmediata post-carrito
+        document.addEventListener('requests-updated', pollRequests);
+        return () => {
+            clearInterval(interval);
+            document.removeEventListener('requests-updated', pollRequests);
+        };
     }, [currentUser]);
+
+
+    const products = useMemo(() => {
+        const aggregatedMap = new Map<string, Product>();
+
+        rawProducts.forEach((p) => {
+            if (!p.code) return;
+
+            const codeKey = p.code.trim().toLowerCase();
+            const channel = (p.channel || '').trim();
+
+            if (!aggregatedMap.has(codeKey)) {
+                aggregatedMap.set(codeKey, { ...p, stock: 0 }); // Initialize with 0 stock
+            }
+
+            const existing = aggregatedMap.get(codeKey)!;
+            
+            // Collect all unique channels that this product has ever been a part of
+            if (channel) {
+                const currentChannels = (existing.channel || '').split(',').map(c => c.trim()).filter(Boolean);
+                if (!currentChannels.includes(channel)) {
+                    existing.channel = [...currentChannels, channel].join(', ');
+                }
+            }
+
+            // Only add stock if it matches the active filter
+            const matchesFilter = selectedChannel === 'TODOS' || channel.toUpperCase().split(',').map(c => c.trim()).includes(selectedChannel);
+            if (matchesFilter) {
+                existing.stock += Number(p.stock) || 0;
+            }
+
+            if (!existing.imageUrl && p.imageUrl) {
+                existing.imageUrl = p.imageUrl;
+            }
+        });
+
+        return Array.from(aggregatedMap.values());
+    }, [rawProducts, selectedChannel]);
 
     const handleCancelRequest = async (req: OrderRequest) => {
         try {
@@ -151,19 +180,19 @@ export default function Catalog() {
         }
 
         const currentProduct = products.find(p => p.code === req.productCode);
-        if (currentProduct && modifyQuantity > currentProduct.stock) {
+        if (currentProduct && Number(modifyQuantity) > currentProduct.stock) {
             alert(`Atención: Hay poco stock disponible. Podrías recibir una entrega parcial o ser rechazado.`);
         }
 
         try {
             await inventoryService.updateRequest(req.id, {
                 ...req,
-                quantity: modifyQuantity
+                quantity: Number(modifyQuantity)
             });
             // Update local state smoothly
             setMyRequests(prev => prev.map(r =>
                 r.id === req.id
-                    ? { ...r, quantity: modifyQuantity }
+                    ? { ...r, quantity: Number(modifyQuantity) } as OrderRequest
                     : r
             ));
             setRequestConfirmCancel(null);
@@ -254,8 +283,8 @@ export default function Catalog() {
 
     return (
         <div className="space-y-6 relative">
-            {showHistory && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
+            {showHistory && createPortal(
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4">
                         <div className="p-5 border-b flex justify-between items-center bg-gray-50">
                             <h2 className="text-xl font-bold text-gray-800 flex items-center gap-2">
@@ -405,14 +434,14 @@ export default function Catalog() {
                             )}
                         </div>
                     </div>
-                </div>
-            )
-            }
+                </div>,
+                document.body
+            )}
 
             {/* In-App Custom Modify/Cancel Dialog */}
             {
-                requestConfirmCancel && (
-                    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in zoom-in-95">
+                requestConfirmCancel && createPortal(
+                    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in zoom-in-95">
                         <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative">
                             <h3 className="text-xl font-bold flex items-center justify-center gap-2 text-gray-900 mb-2">
                                 Gestionar Solicitud
@@ -429,7 +458,7 @@ export default function Catalog() {
                                     return (
                                         <>
                                             <div className="flex items-center justify-center gap-4">
-                                                <button type="button" onClick={() => setModifyQuantity(Math.max(1, modifyQuantity - 1))} className="w-12 h-12 rounded-xl flex items-center justify-center border bg-white text-coca-red hover:bg-red-50 font-bold hover:scale-105 active:scale-95 transition-all shadow-sm">-</button>
+                                                <button type="button" onClick={() => setModifyQuantity(Math.max(1, (Number(modifyQuantity) || 0) - 1))} className="w-12 h-12 rounded-xl flex items-center justify-center border bg-white text-coca-red hover:bg-red-50 font-bold hover:scale-105 active:scale-95 transition-all shadow-sm">-</button>
                                                 <input
                                                     type="number"
                                                     inputMode="numeric"
@@ -437,16 +466,24 @@ export default function Catalog() {
                                                     min="1"
                                                     value={modifyQuantity}
                                                     onChange={(e) => {
-                                                        const val = Math.max(1, parseInt(e.target.value) || 1);
-                                                        setModifyQuantity(Math.min(val, maxStock));
+                                                        const val = e.target.value;
+                                                        if (val === '') {
+                                                            setModifyQuantity('');
+                                                        } else {
+                                                            const parsed = parseInt(val);
+                                                            if (!isNaN(parsed)) setModifyQuantity(Math.min(parsed, maxStock));
+                                                        }
+                                                    }}
+                                                    onBlur={() => {
+                                                        if (modifyQuantity === '' || Number(modifyQuantity) < 1) setModifyQuantity(1);
                                                     }}
                                                     className="w-20 h-12 text-center font-black text-2xl bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-coca-red focus:border-coca-red shadow-inner hide-arrows"
                                                     style={{ WebkitAppearance: 'none', margin: 0, MozAppearance: 'textfield' }}
                                                 />
                                                 <button
                                                     type="button"
-                                                    onClick={() => setModifyQuantity(Math.min(modifyQuantity + 1, maxStock))}
-                                                    disabled={modifyQuantity >= maxStock}
+                                                    onClick={() => setModifyQuantity(Math.min(maxStock, (Number(modifyQuantity) || 0) + 1))}
+                                                    disabled={Number(modifyQuantity) >= maxStock}
                                                     className="w-12 h-12 rounded-xl flex items-center justify-center bg-coca-red text-white hover:bg-red-700 font-bold hover:scale-105 active:scale-95 transition-all shadow-md disabled:opacity-40 disabled:cursor-not-allowed"
                                                 >+</button>
                                             </div>
@@ -463,10 +500,10 @@ export default function Catalog() {
                             <div className="flex flex-col gap-3">
                                 <button
                                     onClick={() => handleModifyRequest(requestConfirmCancel)}
-                                    disabled={modifyQuantity === requestConfirmCancel.quantity}
-                                    className={`w-full py-3 rounded-xl font-bold transition-all ${modifyQuantity === requestConfirmCancel.quantity ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-coca-black text-white hover:bg-gray-800 shadow-md hover:shadow-lg active:scale-95'}`}
+                                    disabled={Number(modifyQuantity) === requestConfirmCancel.quantity}
+                                    className={`w-full py-3 rounded-xl font-bold transition-all ${Number(modifyQuantity) === requestConfirmCancel.quantity ? 'bg-gray-100 text-gray-400 cursor-not-allowed' : 'bg-coca-black text-white hover:bg-gray-800 shadow-md hover:shadow-lg active:scale-95'}`}
                                 >
-                                    {modifyQuantity === requestConfirmCancel.quantity ? 'Modifica la cantidad para guardar' : 'Guardar Nueva Cantidad'}
+                                    {Number(modifyQuantity) === requestConfirmCancel.quantity ? 'Modifica la cantidad para guardar' : 'Guardar Nueva Cantidad'}
                                 </button>
 
                                 <div className="grid grid-cols-2 gap-3 mt-1">
@@ -485,7 +522,8 @@ export default function Catalog() {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </div>,
+                    document.body
                 )
             }
 

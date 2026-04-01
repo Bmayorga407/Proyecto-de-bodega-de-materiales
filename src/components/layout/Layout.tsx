@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Outlet, useNavigate } from 'react-router-dom';
 import { LogOut, UserCircle, X, ShoppingCart, Trash2, Send, Loader2, Package, CheckCircle2, Info } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -113,7 +114,7 @@ export const Layout = () => {
                         className="group flex items-center gap-2 px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded-full transition-all active:scale-95 border border-gray-200"
                     >
                         <Info size={12} className="text-gray-400 group-hover:text-coca-red transition-colors" />
-                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Version 1.1.2</span>
+                        <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Version 1.2.0</span>
                         <span className="w-1.5 h-1.5 bg-coca-red rounded-full animate-pulse shadow-[0_0_8px_rgba(238,28,46,0.5)]"></span>
                     </button>
                 </div>
@@ -125,8 +126,8 @@ export const Layout = () => {
             )}
 
             {/* Modal de Confirmación de Cierre de Sesión */}
-            {isLoggingOut && (
-                <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            {isLoggingOut && createPortal(
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
                         <div className="p-6">
                             <div className="flex items-center gap-4 text-red-600 mb-4">
@@ -154,11 +155,12 @@ export const Layout = () => {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
             {/* Cart Modal */}
-            {isCartOpen && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
+            {isCartOpen && createPortal(
+                <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
                     <div className="bg-white rounded-3xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95">
                         <div className="p-5 border-b flex justify-between items-center bg-gray-50/50">
                             <h2 className="text-xl font-black text-gray-900 flex items-center gap-2">
@@ -317,6 +319,8 @@ export const Layout = () => {
                                             clearCart();
                                             setRequesterName('');
                                             setReceptorName('');
+                                            // Notificar al Catalog para que recargue solicitudes de inmediato
+                                            document.dispatchEvent(new CustomEvent('requests-updated'));
                                         } catch (err) {
                                             console.error('Error sending batch requests:', err);
                                             alert('Hubo un error al enviar el carrito. Revisa tu conexión.');
@@ -334,7 +338,8 @@ export const Layout = () => {
                             </div>
                         )}
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );

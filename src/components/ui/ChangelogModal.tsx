@@ -1,19 +1,38 @@
-import { X, CheckCircle2, Package, Layers, MousePointer2, AlertCircle, ListChecks } from 'lucide-react';
+import { X, CheckCircle2, Package, Layers, MousePointer2, AlertCircle, ListChecks, SlidersHorizontal, ArrowRightLeft, ShieldCheck } from 'lucide-react';
+import { createPortal } from 'react-dom';
 
 interface ChangelogModalProps {
     onClose: () => void;
 }
 
 export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
-    const improvements = [
+    const v120 = [
+        {
+            title: "Ajuste de Inventario",
+            description: "Nuevo botón 'Ajuste' en el detalle de cada producto (solo bodega). Permite hacer traspasos de stock entre canales y registrar ajustes por conteo físico, con o sin diferencia positiva.",
+            icon: <SlidersHorizontal className="text-indigo-500" size={20} />
+        },
+        {
+            title: "Traspaso entre Canales",
+            description: "Mueve unidades de un canal a otro directamente desde el detalle del producto. Incluye vista previa del saldo resultante antes de confirmar.",
+            icon: <ArrowRightLeft className="text-blue-500" size={20} />
+        },
+        {
+            title: "Saldo por Canal Corregido",
+            description: "El saldo por canal ahora se calcula correctamente: cuando bodega aprueba una solicitud desde 'Moderno', el descuento se refleja en Moderno y no en Tradicional.",
+            icon: <ShieldCheck className="text-green-500" size={20} />
+        },
+    ];
+
+    const v112 = [
         {
             title: "Selección Múltiple de Canales",
-            description: "Al registrar un ingreso, ahora puedes seleccionar múltiples canales a la vez utilizando el nuevo selector, evitando crear registros duplicados y agilizando el proceso.",
+            description: "Al registrar un ingreso, ahora puedes seleccionar múltiples canales a la vez, evitando duplicados y agilizando el proceso.",
             icon: <ListChecks className="text-teal-500" size={20} />
         },
         {
             title: "Soporte Multicanal",
-            description: "Ahora los productos pueden pertenecer a múltiples canales (Tradicional, Moderno, etc.) simultáneamente.",
+            description: "Los productos pueden pertenecer a múltiples canales (Tradicional, Moderno, etc.) simultáneamente.",
             icon: <Layers className="text-blue-500" size={20} />
         },
         {
@@ -27,23 +46,23 @@ export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
             icon: <MousePointer2 className="text-purple-500" size={20} />
         },
         {
-            title: "Etiquetado Dinámico",
-            description: "Nueva etiqueta 'MULTICANAL' en el catálogo y visualización de todos los canales en el detalle del producto.",
-            icon: <CheckCircle2 className="text-coca-red" size={20} />
-        },
-        {
             title: "Mejoras de Estabilidad",
             description: "Corrección de errores en la vista de detalles y optimización de filtros de canal.",
             icon: <AlertCircle className="text-orange-500" size={20} />
+        },
+        {
+            title: "Modales a Pantalla Completa",
+            description: "Los fondos oscuros de todos los modales ahora cubren correctamente el menú superior, sin dejar franjas visibles.",
+            icon: <CheckCircle2 className="text-coca-red" size={20} />
         }
     ];
 
-    return (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+    return createPortal(
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
             <div className="bg-white rounded-3xl w-full max-w-lg shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300 border border-gray-100">
                 {/* Header */}
                 <div className="bg-coca-red p-6 text-white relative">
-                    <button 
+                    <button
                         onClick={onClose}
                         className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full transition-colors"
                     >
@@ -53,27 +72,55 @@ export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
                         <span className="px-2 py-0.5 bg-white/20 rounded text-[10px] font-bold tracking-widest uppercase border border-white/30 backdrop-blur-sm">
                             Nuevo
                         </span>
-                        <h2 className="text-2xl font-black tracking-tight">Version 1.1.2</h2>
+                        <h2 className="text-2xl font-black tracking-tight">Version 1.2.0</h2>
                     </div>
                     <p className="text-white/80 text-sm font-medium">
-                        Hemos actualizado el sistema para mejorar la gestión de inventario multicanal.
+                        Ajuste de inventario, corrección de saldos por canal y mejoras de interfaz.
                     </p>
                 </div>
 
                 {/* Content */}
-                <div className="p-6 max-h-[60vh] overflow-y-auto bg-gray-50/30">
-                    <div className="space-y-6">
-                        {improvements.map((item, index) => (
-                            <div key={index} className="flex gap-4 group">
-                                <div className="p-2.5 bg-white rounded-xl shadow-sm border border-gray-100 group-hover:scale-110 transition-transform flex-shrink-0 flex items-center justify-center h-11 w-11">
-                                    {item.icon}
+                <div className="p-6 max-h-[62vh] overflow-y-auto bg-gray-50/30 space-y-6">
+                    {/* v1.2.0 */}
+                    <div>
+                        <p className="text-[10px] font-black text-indigo-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <span className="inline-block w-4 h-0.5 bg-indigo-400 rounded"></span>
+                            Novedades v1.2.0
+                        </p>
+                        <div className="space-y-5">
+                            {v120.map((item, index) => (
+                                <div key={index} className="flex gap-4 group">
+                                    <div className="p-2.5 bg-white rounded-xl shadow-sm border border-gray-100 group-hover:scale-110 transition-transform flex-shrink-0 flex items-center justify-center h-11 w-11">
+                                        {item.icon}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 text-base mb-1">{item.title}</h3>
+                                        <p className="text-gray-600 text-sm leading-relaxed">{item.description}</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 className="font-bold text-gray-900 text-base mb-1">{item.title}</h3>
-                                    <p className="text-gray-600 text-sm leading-relaxed">{item.description}</p>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* Divider */}
+                    <div className="border-t border-gray-100 pt-4">
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+                            <span className="inline-block w-4 h-0.5 bg-gray-300 rounded"></span>
+                            Anteriores — v1.1.2
+                        </p>
+                        <div className="space-y-5 opacity-70">
+                            {v112.map((item, index) => (
+                                <div key={index} className="flex gap-4 group">
+                                    <div className="p-2.5 bg-white rounded-xl shadow-sm border border-gray-100 group-hover:scale-110 transition-transform flex-shrink-0 flex items-center justify-center h-11 w-11">
+                                        {item.icon}
+                                    </div>
+                                    <div>
+                                        <h3 className="font-bold text-gray-900 text-base mb-1">{item.title}</h3>
+                                        <p className="text-gray-600 text-sm leading-relaxed">{item.description}</p>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                            ))}
+                        </div>
                     </div>
                 </div>
 
@@ -87,6 +134,7 @@ export const ChangelogModal = ({ onClose }: ChangelogModalProps) => {
                     </button>
                 </div>
             </div>
-        </div>
+        </div>,
+        document.body
     );
 };

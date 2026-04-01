@@ -1,11 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2, AlertTriangle, ShoppingCart, Eye } from 'lucide-react';
+import { Camera, Save, Trash2, Edit2, Loader2, ArrowLeft, User, Send, X, CheckCircle2, AlertTriangle, ShoppingCart, Eye, SlidersHorizontal, ArrowRightLeft, ClipboardList } from 'lucide-react';
 import { Product } from '../types';
 import { inventoryService } from '../services/inventoryService';
 import { useAuth } from '../context/AuthContext';
 import { useCart } from '../context/CartContext';
 import { useAdminCart } from '../context/AdminCartContext';
+import { createPortal } from 'react-dom';
+
+const ALL_CHANNELS = ['Tradicional', 'Moderno', 'Venta Hogar', 'Publicidad'];
 
 const getLocalDateString = () => {
     const tzoffset = (new Date()).getTimezoneOffset() * 60000;
@@ -143,12 +146,13 @@ export default function ProductDetails() {
     }, [reqIdParam, isLoading]);
     const [requestName, setRequestName] = useState('');
     const [receptorName, setReceptorName] = useState('');
-    const [requestQty, setRequestQty] = useState(1);
+    const [requestQty, setRequestQty] = useState<number | "">(1);
 
     // New Sort/Filter State
     const [sortDesc, setSortDesc] = useState(true);
     const [filterReceptor, setFilterReceptor] = useState('');
     const [isManualMode, setIsManualMode] = useState(false);
+    const [manualLocations, setManualLocations] = useState<{ location: string; quantity: number; channel: string }[]>([]);
 
     const [isRequesting, setIsRequesting] = useState(false);
     const [requestSuccess, setRequestSuccess] = useState('');
@@ -162,6 +166,18 @@ export default function ProductDetails() {
 
     const [definingLocationFor, setDefiningLocationFor] = useState<string | null>(null);
     const [newLocationName, setNewLocationName] = useState('');
+
+    // --- Adjust Modal State ---
+    const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
+    const [adjustMode, setAdjustMode] = useState<'transfer' | 'count'>('transfer');
+    const [adjustIsProcessing, setAdjustIsProcessing] = useState(false);
+    // Transfer mode
+    const [transferFromChannel, setTransferFromChannel] = useState('');
+    const [transferToChannel, setTransferToChannel] = useState('');
+    const [transferQty, setTransferQty] = useState<number | ''>(1);
+    // Count mode
+    const [countChannel, setCountChannel] = useState('');
+    const [countRealQty, setCountRealQty] = useState<number | ''>('');
 
     const showError = (msg: string) => {
         setErrorMsg(msg);
@@ -289,6 +305,121 @@ export default function ProductDetails() {
         }
     };
 
+    const handleAdjust = async () => {
+        if (!baseProduct) return;
+        setAdjustIsProcessing(true);
+        const today = getLocalDateString();
+        const userEmail = currentUser?.email || 'Bodega';
+        // Determine location to use: first named location or 'Sin ubicación'
+        const loc = locationSuggestions[0] || 'Sin ubicación';
+
+        try {
+            if (adjustMode === 'transfer') {
+                if (!transferFromChannel || !transferToChannel) {
+                    showError('Selecciona el canal origen y destino.');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+                if (transferFromChannel === transferToChannel) {
+                    showError('El canal origen y destino no pueden ser iguales.');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+                const qty = Number(transferQty);
+                if (!qty || qty < 1) {
+                    showError('Ingresa una cantidad válida mayor a 0.');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+                const fromStock = stockByChannel[transferFromChannel] || 0;
+                if (qty > fromStock) {
+                    showError(`Solo hay ${fromStock} UN disponibles en ${transferFromChannel}.`);
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+
+                // Movement 1: deduction from origin channel
+                await inventoryService.addProduct({
+                    code: baseProduct.code,
+                    name: baseProduct.name,
+                    description: baseProduct.description || baseProduct.name,
+                    stock: -qty,
+                    details: `[${loc}] Ajuste: Traspaso a ${transferToChannel}`,
+                    channel: transferFromChannel,
+                    imageUrl: baseProduct.imageUrl || '',
+                    entryDate: today,
+                    registeredBy: userEmail,
+                });
+                await new Promise(r => setTimeout(r, 400));
+
+                // Movement 2: addition to destination channel
+                await inventoryService.addProduct({
+                    code: baseProduct.code,
+                    name: baseProduct.name,
+                    description: baseProduct.description || baseProduct.name,
+                    stock: qty,
+                    details: `[${loc}] Ajuste: Traspaso desde ${transferFromChannel}`,
+                    channel: transferToChannel,
+                    imageUrl: baseProduct.imageUrl || '',
+                    entryDate: today,
+                    registeredBy: userEmail,
+                });
+
+                showSuccess(`✓ Traspaso de ${qty} UN de ${transferFromChannel} → ${transferToChannel} registrado.`);
+            } else {
+                // Count mode
+                if (!countChannel) {
+                    showError('Selecciona el canal a ajustar.');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+                if (countRealQty === '' || Number(countRealQty) < 0) {
+                    showError('Ingresa la cantidad real contada (mínimo 0).');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+                const registered = stockByChannel[countChannel] || 0;
+                const real = Number(countRealQty);
+                const diff = real - registered;
+
+                if (diff === 0) {
+                    showError('La cantidad ingresada es igual al saldo registrado. No hay nada que ajustar.');
+                    setAdjustIsProcessing(false);
+                    return;
+                }
+
+                await inventoryService.addProduct({
+                    code: baseProduct.code,
+                    name: baseProduct.name,
+                    description: baseProduct.description || baseProduct.name,
+                    stock: diff, // positive or negative
+                    details: `[${loc}] Ajuste de inventario`,
+                    channel: countChannel,
+                    imageUrl: baseProduct.imageUrl || '',
+                    entryDate: today,
+                    registeredBy: userEmail,
+                });
+
+                const sign = diff > 0 ? '+' : '';
+                showSuccess(`✓ Ajuste de inventario aplicado: ${sign}${diff} UN en canal ${countChannel}.`);
+            }
+
+            await loadProducts();
+            setIsAdjustModalOpen(false);
+            // Reset
+            setTransferFromChannel('');
+            setTransferToChannel('');
+            setTransferQty(1);
+            setCountChannel('');
+            setCountRealQty('');
+        } catch (err) {
+            console.error(err);
+            showError('Hubo un error al registrar el ajuste.');
+        } finally {
+            setAdjustIsProcessing(false);
+        }
+    };
+
     const confirmDelete = async () => {
         if (!productToDelete) return;
         try {
@@ -335,48 +466,82 @@ export default function ProductDetails() {
         return result;
     }, [products, sortDesc, filterReceptor]);
 
-    const { totalStock, stockByLocation } = useMemo(() => {
+    const { totalStock, stockByLocation, stockByChannel } = useMemo(() => {
         let total = 0;
         const byLoc: Record<string, number> = {};
-        let unallocatedNegative = 0;
+        const byChannel: Record<string, number> = {};
+        // Separate unallocated buckets for location and channel balancing
+        let unallocatedNegLoc = 0;      // for balancing byLoc (pending requests, old records)
+        let unallocatedNegChannel = 0;  // for balancing byChannel when channel is unknown
 
         products.forEach(p => {
             const qty = Number(p.stock) || 0;
             total += qty;
+
+            const chan = (p.channel || '').trim();
+            // Si tiene comas, es multicanal "viejo"
+            const finalChan = chan.includes(',') ? 'Multicanal' : (chan || 'Por Definir');
+
             if (qty > 0) {
                 const loc = extractLocationString(p.details);
                 byLoc[loc] = (byLoc[loc] || 0) + qty;
+                byChannel[finalChan] = (byChannel[finalChan] || 0) + qty;
             } else {
                 const loc = extractLocationString(p.details);
-                // Si la deducción tiene ubicación asignable explícita
-                if (loc !== 'Sin ubicación' && String(p.details).includes('[')) {
+
+                // --- Location tracking ---
+                // Si la deducción tiene corchetes en los detalles, la ubicación es conocida
+                if (String(p.details).includes('[')) {
                     byLoc[loc] = (byLoc[loc] || 0) + qty;
                 } else {
-                    unallocatedNegative += qty;
+                    unallocatedNegLoc += qty;
+                }
+
+                // --- Channel tracking ---
+                // CLAVE: si el canal de la fila de deducción es conocido, descontamos
+                // directamente de ese canal. No lo mezclamos con "no asignados".
+                // Esto garantiza que al aprobar desde MODERNO, MODERNO se descuente.
+                if (finalChan !== 'Por Definir') {
+                    byChannel[finalChan] = (byChannel[finalChan] || 0) + qty;
+                } else {
+                    // Canal desconocido (registros viejos sin canal)
+                    unallocatedNegChannel += qty;
                 }
             }
         });
 
-        // Restar también las reservas pendientes o aprobadas que no se hayan descontado de bodega
+        // Restar reservas PENDIENTES (no tienen canal asignado aún)
         total -= pendingRequestsStock;
-        unallocatedNegative -= pendingRequestsStock;
+        unallocatedNegLoc -= pendingRequestsStock;
+        unallocatedNegChannel -= pendingRequestsStock;
 
-        if (unallocatedNegative < 0) {
+        // Balancear negativos sin ubicación asignable contra las ubicaciones positivas
+        if (unallocatedNegLoc < 0) {
+            let negLeft = unallocatedNegLoc;
             for (const loc of Object.keys(byLoc)) {
-                if (unallocatedNegative >= 0) break;
+                if (negLeft >= 0) break;
                 if (byLoc[loc] > 0) {
-                    const available = byLoc[loc];
-                    const deduction = Math.min(available, Math.abs(unallocatedNegative));
+                    const deduction = Math.min(byLoc[loc], Math.abs(negLeft));
                     byLoc[loc] -= deduction;
-                    unallocatedNegative += deduction;
+                    negLeft += deduction;
                 }
             }
         }
 
-        console.log(`[stockByLocation Debug] Total: ${total}, UnallocatedNeg Left: ${unallocatedNegative}`);
-        console.log(`[stockByLocation Debug] Final ByLoc:`, byLoc);
+        // Balancear negativos sin canal conocido contra los canales positivos
+        if (unallocatedNegChannel < 0) {
+            let negLeft = unallocatedNegChannel;
+            for (const ch of Object.keys(byChannel)) {
+                if (negLeft >= 0) break;
+                if (byChannel[ch] > 0) {
+                    const deduction = Math.min(byChannel[ch], Math.abs(negLeft));
+                    byChannel[ch] -= deduction;
+                    negLeft += deduction;
+                }
+            }
+        }
 
-        return { totalStock: total, stockByLocation: byLoc };
+        return { totalStock: total, stockByLocation: byLoc, stockByChannel: byChannel };
     }, [products, pendingRequestsStock]);
 
     const locationSuggestions = useMemo(() => {
@@ -418,6 +583,44 @@ export default function ProductDetails() {
         return Array.from(channels);
     }, [products]);
 
+    // Ubicaciones disponibles para salida manual (agrupadas por canal+ubicación)
+    // Incluye todos los registros con stock positivo aunque no tengan ubicación definida
+    const availableLocationsForSalida = useMemo(() => {
+        const locs = new Set<string>();
+        products.forEach(p => {
+            if (Number(p.stock) > 0) {
+                // Determinar la ubicación: extraer del details o usar 'Sin ubicación'
+                const rawLoc = p.details ? getCleanLocation(p.details) : '';
+                const isBadLoc = !rawLoc
+                    || rawLoc.toLowerCase().includes('por definir')
+                    || rawLoc.toLowerCase().includes('baja')
+                    || rawLoc.toLowerCase().includes('entrega')
+                    || rawLoc.toLowerCase().includes('receptor');
+                const loc = isBadLoc ? 'Sin ubicación' : rawLoc;
+                const channel = (p.channel || '').trim();
+                locs.add(`${channel}|||${loc}`);
+            }
+        });
+        return Array.from(locs);
+    }, [products]);
+
+    // Stock disponible en una ubicación+canal (respeta la misma normalización que availableLocationsForSalida)
+    const getStockInLocationAndChannel = (loc: string, channel: string): number => {
+        return products
+            .filter(p => {
+                const rawLoc = p.details ? getCleanLocation(p.details) : '';
+                const isBadLoc = !rawLoc
+                    || rawLoc.toLowerCase().includes('por definir')
+                    || rawLoc.toLowerCase().includes('baja')
+                    || rawLoc.toLowerCase().includes('entrega')
+                    || rawLoc.toLowerCase().includes('receptor');
+                const pLoc = isBadLoc ? 'Sin ubicación' : rawLoc;
+                const pChannel = (p.channel || '').trim();
+                return pLoc === loc && pChannel === channel;
+            })
+            .reduce((sum, p) => sum + Number(p.stock), 0);
+    };
+
     if (isLoading) {
         return (
             <div className="flex flex-col items-center justify-center py-20">
@@ -443,7 +646,7 @@ export default function ProductDetails() {
 
     const handleCreateRequest = async (e?: React.FormEvent, forceStatus?: 'APROBADA' | 'ENTREGADA' | 'BAJA', manualReason?: string) => {
         if (e) e.preventDefault();
-        if (requestQty < 1 || requestQty > totalStock) {
+        if (Number(requestQty) < 1 || Number(requestQty) > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
             return;
         }
@@ -473,7 +676,7 @@ export default function ProductDetails() {
                 const createdReq = await inventoryService.createRequest({
                     productCode: baseProduct.code,
                     productName: baseProduct.name,
-                    quantity: requestQty,
+                    quantity: Number(requestQty),
                     requestedBy: requestName.trim(),
                     receptorName: receptorName.trim() || requestName.trim(),
                     requesterEmail: currentUser?.email || '',
@@ -487,59 +690,82 @@ export default function ProductDetails() {
             // SOLO descontar del inventario "físico" (agregar fila negativa) si es manual o baja.
             // Las solicitudes normales de Ventas (PENDIENTE) NO descuentan stock hasta ser aprobadas.
             if ((isManualReserva || isManualEntrega || isBaja) && forceStatus) {
-                // Lógica de deducción automática por ubicaciones
-                let remainingToDeduct = requestQty;
+                // Si hay ubicaciones seleccionadas manualmente, usarlas; si no (baja rápida), modo automático
+                if (manualLocations.length > 0) {
+                    // Descontar desde cada ubicación+canal seleccionada por el usuario
+                    for (const sel of manualLocations) {
+                        if (sel.quantity <= 0) continue;
 
-                // Ordenar ubicaciones para descontar
-                const locationsWithStock = products
-                    .filter(p => p.stock > 0)
-                    .sort((a, b) => a.stock - b.stock);
+                        let finalDetails = '';
+                        if (isBaja) {
+                            const effectiveReason = manualReason || receptorName.trim() || 'No especificado';
+                            finalDetails = `[${sel.location}] BAJA - Motivo: ${effectiveReason}`;
+                        } else {
+                            finalDetails = `[${sel.location}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
+                        }
 
-                for (const locProduct of locationsWithStock) {
-                    if (remainingToDeduct <= 0) break;
+                        await inventoryService.addProduct({
+                            code: baseProduct.code,
+                            name: baseProduct.name,
+                            stock: -sel.quantity,
+                            details: finalDetails,
+                            channel: sel.channel,
+                            entryDate: getLocalDateString(),
+                            registeredBy: currentUser?.email || 'Bodega'
+                        });
+                        await new Promise(r => setTimeout(r, 350));
+                    }
+                } else {
+                    // Modo automático (usado solo en bajas rápidas sin selección)
+                    let remainingToDeduct = Number(requestQty);
 
-                    const deductFromThisLoc = Math.min(locProduct.stock, remainingToDeduct);
+                    const locationsWithStock = products
+                        .filter(p => p.stock > 0)
+                        .sort((a, b) => a.stock - b.stock);
 
-                    let locName = getCleanLocation(locProduct.details);
-                    // Si la ubicación extraída parece un movimiento previo, fallback a genérico
-                    if (locName.toUpperCase().includes('BAJA') || locName.toUpperCase().includes('ENTREGA') || locName.toUpperCase().includes('RECEPTOR')) {
-                        locName = 'Sin ubicación';
+                    for (const locProduct of locationsWithStock) {
+                        if (remainingToDeduct <= 0) break;
+
+                        const deductFromThisLoc = Math.min(locProduct.stock, remainingToDeduct);
+
+                        let locName = getCleanLocation(locProduct.details);
+                        if (locName.toUpperCase().includes('BAJA') || locName.toUpperCase().includes('ENTREGA') || locName.toUpperCase().includes('RECEPTOR')) {
+                            locName = 'Sin ubicación';
+                        }
+
+                        let finalDetails = '';
+                        if (isBaja) {
+                            const effectiveReason = manualReason || receptorName.trim() || 'No especificado';
+                            finalDetails = `[${locName}] BAJA - Motivo: ${effectiveReason}`;
+                        } else {
+                            finalDetails = `[${locName}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
+                        }
+
+                        await inventoryService.addProduct({
+                            code: baseProduct.code,
+                            name: baseProduct.name,
+                            stock: -deductFromThisLoc,
+                            details: finalDetails,
+                            channel: locProduct.channel,
+                            entryDate: getLocalDateString(),
+                            registeredBy: currentUser?.email || 'Bodega'
+                        });
+
+                        remainingToDeduct -= deductFromThisLoc;
                     }
 
-                    let finalDetails = '';
-                    if (isBaja) {
-                        const effectiveReason = manualReason || receptorName.trim() || 'No especificado';
-                        finalDetails = `[${locName}] BAJA - Motivo: ${effectiveReason}`;
-                    } else {
-                        finalDetails = `[${locName}] Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`;
+                    if (remainingToDeduct > 0) {
+                        const finalReason = manualReason || receptorName.trim() || 'No especificado';
+                        await inventoryService.addProduct({
+                            code: baseProduct.code,
+                            name: baseProduct.name,
+                            stock: -remainingToDeduct,
+                            details: isBaja ? `BAJA - Motivo: ${finalReason}` : `ENTREGA - Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`,
+                            channel: baseProduct.channel || '',
+                            entryDate: getLocalDateString(),
+                            registeredBy: currentUser?.email || 'Bodega'
+                        });
                     }
-
-                    await inventoryService.addProduct({
-                        code: baseProduct.code,
-                        name: baseProduct.name,
-                        stock: -deductFromThisLoc,
-                        details: finalDetails,
-                        channel: locProduct.channel,
-                        entryDate: getLocalDateString(),
-                        registeredBy: currentUser?.email || 'Bodega'
-                    });
-
-                    remainingToDeduct -= deductFromThisLoc;
-                }
-
-                // Si por alguna razón queda algo por descontar (ej: el stock total era inconsistente o sin ubicación), 
-                // hacemos un último descuento genérico
-                if (remainingToDeduct > 0) {
-                    const finalReason = manualReason || receptorName.trim() || 'No especificado';
-                    await inventoryService.addProduct({
-                        code: baseProduct.code,
-                        name: baseProduct.name,
-                        stock: -remainingToDeduct,
-                        details: isBaja ? `BAJA - Motivo: ${finalReason}` : `ENTREGA - Receptor: ${receptorName.trim() || requestName.trim()}${reqId ? ` ||REQ:${reqId}` : ''}`,
-                        channel: baseProduct.channel || '',
-                        entryDate: getLocalDateString(),
-                        registeredBy: currentUser?.email || 'Bodega'
-                    });
                 }
             }
 
@@ -557,6 +783,7 @@ export default function ProductDetails() {
                 setRequestQty(1);
                 setRequestName('');
                 setReceptorName('');
+                setManualLocations([]);
                 loadProducts();
             }, 2500);
         } catch (err) {
@@ -571,7 +798,7 @@ export default function ProductDetails() {
 
     const handleAddToCart = () => {
         if (!baseProduct) return;
-        if (requestQty < 1 || requestQty > totalStock) {
+        if (Number(requestQty) < 1 || Number(requestQty) > totalStock) {
             showError('Cantidad inválida o superior al stock disponible.');
             return;
         }
@@ -580,7 +807,7 @@ export default function ProductDetails() {
             addToAdminCart({
                 productCode: baseProduct.code,
                 name: baseProduct.name,
-                quantity: requestQty,
+                quantity: Number(requestQty),
                 maxStock: totalStock,
                 imageUrl: baseProduct.imageUrl,
                 channel: baseProduct.channel,
@@ -589,7 +816,7 @@ export default function ProductDetails() {
             showSuccess(`${baseProduct.name} añadido a Lista Masiva.`);
         } else {
             // Pasar el producto con el stock total neto (sumado de todas las ubicaciones)
-            addToCart({ ...baseProduct, stock: totalStock }, requestQty);
+            addToCart({ ...baseProduct, stock: totalStock }, Number(requestQty));
             showSuccess(`${baseProduct.name} añadido al carrito.`);
         }
         setIsRequestModalOpen(false);
@@ -648,15 +875,16 @@ export default function ProductDetails() {
             </div>
 
             {/* Modal de Imagen Pantalla Completa */}
-            {isImageModalOpen && (
-                <div className="fixed inset-0 z-[100] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setIsImageModalOpen(false)}>
+            {isImageModalOpen && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/95 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => setIsImageModalOpen(false)}>
                     <button className="absolute top-6 right-6 text-white/70 hover:text-white p-2 rounded-full hover:bg-white/10 transition-colors" onClick={() => setIsImageModalOpen(false)}>
                         <X size={32} />
                     </button>
                     {baseProduct.imageUrl && (
                         <img src={baseProduct.imageUrl} alt={baseProduct.name} className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" onClick={e => e.stopPropagation()} />
                     )}
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* Datos del Producto */}
@@ -684,14 +912,39 @@ export default function ProductDetails() {
                             )}
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-gray-50/50 p-5 rounded-2xl border border-gray-100/50 w-full">
-                            <div>
-                                <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Descripción</span>
-                                <h2 className="text-xl font-black text-gray-900 uppercase tracking-tight">{baseProduct.name}</h2>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 bg-gray-50/50 p-5 rounded-2xl border border-gray-100/50 w-full mb-2">
+                            <div className="flex flex-col">
+                                <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+                                    Descripción
+                                </span>
+                                <h2 className="text-lg font-black text-gray-900 uppercase tracking-tight leading-tight">{baseProduct.name}</h2>
                             </div>
-                            <div>
-                                <span className="block text-xs font-bold text-gray-400 uppercase tracking-widest mb-1">Más Detalles</span>
-                                <p className="text-gray-600 text-sm leading-relaxed uppercase font-medium">{baseProduct.description}</p>
+                            <div className="flex flex-col">
+                                <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+                                    Más Detalles
+                                </span>
+                                <p className="text-gray-600 text-[13px] leading-relaxed uppercase font-medium line-clamp-2">{baseProduct.description || 'Sin descripción'}</p>
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="block text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-gray-300"></div>
+                                    Ubicaciones
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                    {Object.keys(stockByLocation).filter(l => l !== 'Sin ubicación' && stockByLocation[l] > 0).length > 0 ? (
+                                        Object.keys(stockByLocation)
+                                            .filter(l => l !== 'Sin ubicación' && stockByLocation[l] > 0)
+                                            .map(loc => (
+                                                <span key={loc} className="px-2 py-0.5 bg-white border border-gray-200 text-gray-500 rounded text-[10px] font-bold uppercase shadow-sm">
+                                                    {loc}
+                                                </span>
+                                            ))
+                                    ) : (
+                                        <span className="text-[11px] text-gray-400 italic">Por definir</span>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -706,41 +959,43 @@ export default function ProductDetails() {
                                 </p>
                             )}
 
-                            {/* Stock por ubicación */}
-                            {Object.entries(stockByLocation).filter(([_, qty]) => qty > 0).length > 0 && (
+                            {/* Saldo por Canal */}
+                            {Object.entries(stockByChannel).filter(([_, qty]) => qty > 0).length > 0 && (
                                 <div className="mt-5 pt-4 border-t border-red-200/60 flex flex-col gap-2 text-sm">
-                                    <p className="text-xs text-red-800/60 font-medium uppercase tracking-wider mb-1">Por Ubicación</p>
-                                    {Object.entries(stockByLocation)
-                                        .filter(([_, qty]) => qty > 0)
-                                        .map(([loc, qty]) => {
-                                            const locStr = loc != null ? String(loc) : '';
-                                            const isPorDefinir = locStr.toLowerCase().includes('por definir');
-                                            return (
-                                                <div key={locStr} className={`flex justify-between items-center px-3 py-2 rounded-xl border ${isPorDefinir ? 'bg-orange-50 border-orange-200/60 shadow-inner' : 'bg-white/40 border-red-100/50'} text-red-900`}>
-                                                    <span className="truncate pr-3 font-medium flex items-center gap-2">
-                                                        {isPorDefinir ? (
-                                                            <span className="flex items-center gap-1.5 text-orange-800 font-bold">
-                                                                <AlertTriangle size={14} className="text-orange-500 shrink-0" />
-                                                                <span className="truncate">{locStr}</span>
-                                                            </span>
-                                                        ) : (
-                                                            locStr
-                                                        )}
-                                                        {role === 'BODEGA' && isPorDefinir && (
-                                                            <button
-                                                                onClick={() => setDefiningLocationFor(locStr)}
-                                                                className="ml-1 text-[10px] text-white bg-orange-500 hover:bg-orange-600 px-2.5 py-1 rounded-full shadow-sm transition-all hover:scale-105 active:scale-95 uppercase tracking-wider font-bold shrink-0"
-                                                            >
-                                                                Asignar
-                                                            </button>
-                                                        )}
-                                                    </span>
-                                                    <span className={`font-bold px-2.5 py-1 rounded-lg shadow-sm border whitespace-nowrap ${isPorDefinir ? 'bg-white text-orange-800 border-orange-200/50' : 'bg-white text-coca-red border-red-100/30'}`}>
-                                                        {qty} UN
-                                                    </span>
-                                                </div>
-                                            );
-                                        })}
+                                    <p className="text-xs text-red-800/60 font-medium uppercase tracking-wider mb-2">Saldo por Canal</p>
+                                    <div className="space-y-2">
+                                        {Object.entries(stockByChannel)
+                                            .filter(([_, qty]) => qty > 0)
+                                            .sort((a,b) => b[1] - a[1])
+                                            .map(([chan, qty]) => {
+                                                const isModerno = chan.toLowerCase().includes('moderno');
+                                                const isTradicional = chan.toLowerCase().includes('tradicional');
+                                                const isMulticanal = chan.toLowerCase().includes('multicanal');
+                                                
+                                                let bgColor = 'bg-white/40 border-red-100/50 text-red-900';
+                                                let badgeColor = 'bg-white text-coca-red border-red-100/30';
+                                                
+                                                if (isModerno) {
+                                                    bgColor = 'bg-blue-50 border-blue-100 text-blue-900';
+                                                    badgeColor = 'bg-white text-blue-600 border-blue-200/50';
+                                                } else if (isTradicional || isMulticanal) {
+                                                    bgColor = 'bg-amber-50 border-amber-100 text-amber-900';
+                                                    badgeColor = 'bg-white text-amber-600 border-amber-200/50';
+                                                }
+
+                                                return (
+                                                    <div key={chan} className={`flex justify-between items-center px-3 py-2 rounded-xl border ${bgColor} shadow-sm`}>
+                                                        <span className="truncate pr-3 font-bold text-[11px] uppercase tracking-wider flex items-center gap-2">
+                                                            <div className={`w-1.5 h-1.5 rounded-full ${isModerno ? 'bg-blue-400' : 'bg-amber-400'}`}></div>
+                                                            {chan}
+                                                        </span>
+                                                        <span className={`font-black text-[13px] px-2.5 py-1 rounded-lg shadow-sm border whitespace-nowrap ${badgeColor}`}>
+                                                            {qty} UN
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })}
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -764,13 +1019,240 @@ export default function ProductDetails() {
                                 Salida Manual
                             </button>
                         )}
+                        {role === 'BODEGA' && (
+                            <button
+                                onClick={() => {
+                                    setAdjustMode('transfer');
+                                    setTransferFromChannel('');
+                                    setTransferToChannel('');
+                                    setTransferQty(1);
+                                    setCountChannel('');
+                                    setCountRealQty('');
+                                    setIsAdjustModalOpen(true);
+                                }}
+                                className="w-full sm:w-auto bg-indigo-600 text-white px-6 py-4 rounded-xl hover:bg-indigo-700 transition-all hover:scale-[1.02] shadow-md hover:shadow-xl font-bold active:scale-95 text-lg flex items-center justify-center gap-2"
+                            >
+                                <SlidersHorizontal size={20} />
+                                Ajuste
+                            </button>
+                        )}
                     </div>
                 </div>
             </div>
 
+
+            {/* ===== ADJUST MODAL ===== */}
+            {isAdjustModalOpen && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in">
+                    <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 border border-gray-100">
+                        {/* Header */}
+                        <div className="bg-indigo-600 px-6 py-5 flex items-center justify-between">
+                            <div>
+                                <h2 className="text-lg font-black text-white">Ajuste de Inventario</h2>
+                                <p className="text-indigo-200 text-xs mt-0.5">{baseProduct?.name} · Cód. {baseProduct?.code}</p>
+                            </div>
+                            <button onClick={() => setIsAdjustModalOpen(false)} className="text-indigo-200 hover:text-white p-1.5 hover:bg-indigo-500 rounded-full transition-all">
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Mode Tabs */}
+                        <div className="flex border-b border-gray-100">
+                            <button
+                                onClick={() => setAdjustMode('transfer')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-bold transition-colors ${
+                                    adjustMode === 'transfer'
+                                        ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50'
+                                        : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                            >
+                                <ArrowRightLeft size={16} /> Traspaso de Canal
+                            </button>
+                            <button
+                                onClick={() => setAdjustMode('count')}
+                                className={`flex-1 flex items-center justify-center gap-2 py-3.5 text-sm font-bold transition-colors ${
+                                    adjustMode === 'count'
+                                        ? 'text-indigo-600 border-b-2 border-indigo-600 bg-indigo-50/50'
+                                        : 'text-gray-400 hover:text-gray-600'
+                                }`}
+                            >
+                                <ClipboardList size={16} /> Ajuste por Inventario
+                            </button>
+                        </div>
+
+                        <div className="p-6 space-y-5">
+                            {adjustMode === 'transfer' ? (
+                                <>
+                                    {/* Transfer Mode */}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Canal Origen</label>
+                                            <select
+                                                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                                value={transferFromChannel}
+                                                onChange={e => setTransferFromChannel(e.target.value)}
+                                            >
+                                                <option value="">Seleccionar...</option>
+                                                {ALL_CHANNELS.map(ch => (
+                                                    <option key={ch} value={ch} disabled={(stockByChannel[ch] || 0) <= 0}>
+                                                        {ch} ({stockByChannel[ch] || 0} UN)
+                                                    </option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Canal Destino</label>
+                                            <select
+                                                className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                                value={transferToChannel}
+                                                onChange={e => setTransferToChannel(e.target.value)}
+                                            >
+                                                <option value="">Seleccionar...</option>
+                                                {ALL_CHANNELS.filter(ch => ch !== transferFromChannel).map(ch => (
+                                                    <option key={ch} value={ch}>{ch}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Cantidad a Traspasar</label>
+                                        <div className="flex items-center gap-3">
+                                            <button type="button" onClick={() => setTransferQty(q => Math.max(1, Number(q) - 1))} className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-indigo-50 flex items-center justify-center font-bold text-lg text-gray-700 transition-colors">-</button>
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max={stockByChannel[transferFromChannel] || 9999}
+                                                value={transferQty}
+                                                onChange={e => {
+                                                    const v = e.target.value;
+                                                    setTransferQty(v === '' ? '' : Math.max(1, Number(v)));
+                                                }}
+                                                onFocus={e => e.target.select()}
+                                                className="flex-1 text-center px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-lg font-black text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                            />
+                                            <button type="button" onClick={() => setTransferQty(q => Math.min(stockByChannel[transferFromChannel] || 9999, Number(q) + 1))} className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-indigo-50 flex items-center justify-center font-bold text-lg text-gray-700 transition-colors">+</button>
+                                        </div>
+                                    </div>
+
+                                    {/* Preview */}
+                                    {transferFromChannel && transferToChannel && Number(transferQty) > 0 && (
+                                        <div className="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
+                                            <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Vista previa del resultado</p>
+                                            <div className="space-y-2">
+                                                {[
+                                                    { ch: transferFromChannel, before: stockByChannel[transferFromChannel] || 0, after: (stockByChannel[transferFromChannel] || 0) - Number(transferQty) },
+                                                    { ch: transferToChannel, before: stockByChannel[transferToChannel] || 0, after: (stockByChannel[transferToChannel] || 0) + Number(transferQty) }
+                                                ].map(({ ch, before, after }) => (
+                                                    <div key={ch} className="flex items-center gap-2 text-sm">
+                                                        <span className="font-bold text-indigo-700 w-28 truncate text-xs uppercase">{ch}</span>
+                                                        <span className="text-gray-400">{before} UN</span>
+                                                        <span className="text-gray-300">→</span>
+                                                        <span className={`font-black ${after < 0 ? 'text-red-600' : after > before ? 'text-green-600' : 'text-indigo-700'}`}>{after} UN</span>
+                                                        {after < 0 && <span className="text-red-500 text-[10px] font-bold">⚠ Sin stock suficiente</span>}
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            ) : (
+                                <>
+                                    {/* Count Mode */}
+                                    <div>
+                                        <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Canal a Ajustar</label>
+                                        <select
+                                            className="w-full px-3 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm font-bold text-gray-900 focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none"
+                                            value={countChannel}
+                                            onChange={e => { setCountChannel(e.target.value); setCountRealQty(''); }}
+                                        >
+                                            <option value="">Seleccionar...</option>
+                                            {ALL_CHANNELS.map(ch => (
+                                                <option key={ch} value={ch}>
+                                                    {ch} — registrado: {stockByChannel[ch] || 0} UN
+                                                </option>
+                                            ))}
+                                        </select>
+                                    </div>
+
+                                    {countChannel && (
+                                        <>
+                                            <div className="flex items-center justify-between bg-gray-50 rounded-xl px-4 py-3 border border-gray-200">
+                                                <span className="text-sm text-gray-500">Stock registrado en sistema</span>
+                                                <span className="text-xl font-black text-gray-900">{stockByChannel[countChannel] || 0} UN</span>
+                                            </div>
+
+                                            <div>
+                                                <label className="block text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1.5">Cantidad Real Contada Hoy</label>
+                                                <input
+                                                    type="number"
+                                                    min="0"
+                                                    placeholder="Ej: 2"
+                                                    value={countRealQty}
+                                                    onChange={e => setCountRealQty(e.target.value === '' ? '' : Number(e.target.value))}
+                                                    onFocus={e => e.target.select()}
+                                                    className="w-full text-center px-3 py-3 bg-gray-50 border border-gray-200 rounded-xl text-2xl font-black text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                                />
+                                            </div>
+
+                                            {countRealQty !== '' && countRealQty !== (stockByChannel[countChannel] || 0) && (
+                                                <div className={`rounded-2xl p-4 border flex items-start gap-3 ${
+                                                    Number(countRealQty) < (stockByChannel[countChannel] || 0)
+                                                        ? 'bg-red-50 border-red-100'
+                                                        : 'bg-green-50 border-green-100'
+                                                }`}>
+                                                    <div className={`p-2 rounded-full ${
+                                                        Number(countRealQty) < (stockByChannel[countChannel] || 0)
+                                                            ? 'bg-red-100 text-red-600'
+                                                            : 'bg-green-100 text-green-600'
+                                                    }`}>
+                                                        {Number(countRealQty) < (stockByChannel[countChannel] || 0)
+                                                            ? <AlertTriangle size={16} />
+                                                            : <CheckCircle2 size={16} />}
+                                                    </div>
+                                                    <div>
+                                                        <p className={`text-sm font-black ${
+                                                            Number(countRealQty) < (stockByChannel[countChannel] || 0) ? 'text-red-700' : 'text-green-700'
+                                                        }`}>
+                                                            Diferencia: {Number(countRealQty) > (stockByChannel[countChannel] || 0) ? '+' : ''}{Number(countRealQty) - (stockByChannel[countChannel] || 0)} UN
+                                                        </p>
+                                                        <p className="text-xs text-gray-500 mt-0.5">
+                                                            Se registrará un movimiento de "Ajuste de inventario" por esa diferencia.
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </>
+                                    )}
+                                </>
+                            )}
+                        </div>
+
+                        {/* Footer */}
+                        <div className="px-6 pb-6 flex gap-3">
+                            <button
+                                onClick={() => setIsAdjustModalOpen(false)}
+                                className="flex-1 px-4 py-3 bg-gray-100 text-gray-700 rounded-xl font-bold hover:bg-gray-200 transition-colors"
+                            >
+                                Cancelar
+                            </button>
+                            <button
+                                onClick={handleAdjust}
+                                disabled={adjustIsProcessing}
+                                className="flex-2 flex-1 px-4 py-3 bg-indigo-600 text-white rounded-xl font-bold hover:bg-indigo-700 transition-all active:scale-95 shadow-md shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                            >
+                                {adjustIsProcessing ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                                {adjustIsProcessing ? 'Procesando...' : adjustMode === 'transfer' ? 'Confirmar Traspaso' : 'Aplicar Ajuste'}
+                            </button>
+                        </div>
+                    </div>
+                </div>,
+                document.body
+            )}
+
             {/* Modal para Definir Ubicación Rápida */}
-            {definingLocationFor && (
-                <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            {definingLocationFor && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
                         <div className="p-5 flex items-start justify-between border-b bg-gray-50 border-gray-100">
                             <h3 className="text-xl font-bold text-gray-900">Definir Ubicación</h3>
@@ -831,7 +1313,8 @@ export default function ProductDetails() {
                             </div>
                         </form>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
 
             {/* Modal de Edición En Línea */}
@@ -1006,8 +1489,8 @@ export default function ProductDetails() {
             )}
 
             {/* Modal de Confirmación de Eliminación */}
-            {productToDelete && (
-                <div className="fixed inset-0 z-[150] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            {productToDelete && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
                         <div className="p-5 flex items-start gap-4 border-b bg-red-50 border-red-100">
                             <div className="p-2 rounded-full bg-red-100 text-red-600">
@@ -1042,12 +1525,13 @@ export default function ProductDetails() {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
             {/* Modal de Solicitud de Venta */}
-            {isRequestModalOpen && (
-                <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden p-6 relative animate-in fade-in zoom-in-95">
+            {isRequestModalOpen && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className={`bg-white rounded-3xl shadow-xl w-full overflow-y-auto max-h-[92vh] ${isManualMode && modalStep === 2 ? 'max-w-lg' : 'max-w-sm'} p-6 relative animate-in fade-in zoom-in-95`}>
                         <button onClick={() => setIsRequestModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-900 bg-gray-100 p-2 rounded-full transition-colors">
                             <X size={20} />
                         </button>
@@ -1063,7 +1547,7 @@ export default function ProductDetails() {
                                     : `Ingresa la cantidad que necesitas de ${baseProduct.name}.`}
                             </p>
 
-                            {pendingRequestsStock > 0 && (totalStock - pendingRequestsStock < requestQty) && (
+                            {pendingRequestsStock > 0 && (totalStock - pendingRequestsStock < Number(requestQty)) && (
                                 <div className="mt-4 bg-orange-50 border border-orange-200 rounded-lg p-3 flex gap-3 text-orange-800 text-sm animate-in fade-in">
                                     <AlertTriangle size={18} className="shrink-0 mt-0.5 text-orange-500" />
                                     <div>
@@ -1083,9 +1567,29 @@ export default function ProductDetails() {
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-2">Cantidad a Retirar</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 p-1">
-                                        <button type="button" onClick={() => setRequestQty(Math.max(1, requestQty - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
-                                        <input type="number" inputMode="numeric" pattern="[0-9]*" min="1" max={totalStock} className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none" value={requestQty} onChange={(e) => setRequestQty(parseInt(e.target.value) || 1)} />
-                                        <button type="button" onClick={() => setRequestQty(Math.min(totalStock, requestQty + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
+                                        <button type="button" onClick={() => setRequestQty(Math.max(1, (Number(requestQty) || 0) - 1))} className="w-12 h-12 flex items-center justify-center bg-white rounded-lg shadow-sm font-bold text-lg hover:bg-gray-100 text-coca-red">-</button>
+                                        <input
+                                            type="number"
+                                            inputMode="numeric"
+                                            pattern="[0-9]*"
+                                            min="1"
+                                            max={totalStock}
+                                            className="flex-1 text-center bg-transparent border-none focus:ring-0 text-xl font-bold text-gray-900 outline-none"
+                                            value={requestQty}
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (val === '') {
+                                                    setRequestQty('');
+                                                } else {
+                                                    const parsed = parseInt(val);
+                                                    if (!isNaN(parsed)) setRequestQty(Math.min(parsed, totalStock));
+                                                }
+                                            }}
+                                            onBlur={() => {
+                                                if (requestQty === '' || Number(requestQty) < 1) setRequestQty(1);
+                                            }}
+                                        />
+                                        <button type="button" onClick={() => setRequestQty(Math.min(totalStock, (Number(requestQty) || 0) + 1))} className="w-12 h-12 flex items-center justify-center bg-coca-red text-white rounded-lg shadow-sm font-bold text-lg hover:bg-red-700">+</button>
                                     </div>
                                     <div className="flex justify-between mt-2 text-xs font-semibold px-1">
                                         <span className="text-gray-500">Mínimo: 1</span>
@@ -1104,7 +1608,7 @@ export default function ProductDetails() {
                                     </button>
                                     <button
                                         type="button"
-                                        onClick={() => setModalStep(2)}
+                                        onClick={() => { setModalStep(2); setManualLocations([]); }}
                                         className="w-full py-4 rounded-xl font-bold text-white bg-coca-red hover:bg-red-700 flex justify-center items-center gap-2 transition-all shadow-md active:scale-95"
                                     >
                                         <Send size={20} />
@@ -1117,7 +1621,7 @@ export default function ProductDetails() {
                                                 setBajaReason('');
                                                 setIsBajaPromptOpen(true);
                                             }}
-                                            disabled={isRequesting || requestQty > totalStock}
+                                            disabled={isRequesting || Number(requestQty) > totalStock}
                                             className="w-full py-2 mt-2 text-sm font-semibold text-amber-700 hover:text-amber-800 flex justify-center items-center gap-1.5 transition-colors"
                                         >
                                             {isRequesting ? <Loader2 size={16} className="animate-spin" /> : <AlertTriangle size={16} />}
@@ -1135,6 +1639,78 @@ export default function ProductDetails() {
                                 >
                                     <ArrowLeft size={12} /> Volver a cantidad
                                 </button>
+
+                                {/* Selector de Canal/Ubicación para salida manual del bodeguero */}
+                                {isManualMode && availableLocationsForSalida.length > 0 && (
+                                    <div className="bg-red-50/40 p-4 rounded-xl border border-red-100 mb-2">
+                                        <div className="flex justify-between items-center mb-3">
+                                            <label className="text-sm font-bold text-red-800">Extraer desde:</label>
+                                            <span className="text-xs font-semibold px-2 py-1 bg-white border border-red-200 rounded-md text-red-700 shadow-sm">
+                                                Selec: <span className="font-bold">{manualLocations.reduce((a, c) => a + c.quantity, 0)}</span> / {Number(requestQty)}
+                                            </span>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {availableLocationsForSalida.map(locKey => {
+                                                const [ch, loc] = locKey.split('|||');
+                                                const maxAvailable = getStockInLocationAndChannel(loc, ch);
+                                                const currentQty = manualLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
+                                                const totalSelected = manualLocations.reduce((a, c) => a + c.quantity, 0);
+                                                const canAdd = currentQty < maxAvailable && totalSelected < Number(requestQty);
+                                                return (
+                                                    <div key={locKey} className={`bg-white border rounded-xl p-3 shadow-sm flex items-center justify-between transition-colors ${currentQty > 0 ? 'border-red-400 ring-1 ring-red-400/20' : 'border-red-200'}`}>
+                                                        <div className="flex-1 min-w-0 pr-3">
+                                                            <div className="text-[10px] font-black uppercase text-coca-red tracking-widest bg-red-50 inline-block px-1.5 py-0.5 rounded mb-1 border border-red-100">{ch || 'Sin Canal'}</div>
+                                                            <div className="text-sm font-bold text-gray-800 truncate" title={loc}>{loc}</div>
+                                                            <div className="text-xs text-gray-500 mt-0.5">Stock: <span className="font-bold text-gray-700">{maxAvailable}</span></div>
+                                                        </div>
+                                                        <div className="flex items-center bg-gray-50 rounded-lg p-1 border border-gray-100 shrink-0">
+                                                            <button type="button" disabled={currentQty === 0} onClick={() => {
+                                                                const newArr = [...manualLocations];
+                                                                const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
+                                                                if (idx >= 0) {
+                                                                    if (newArr[idx].quantity > 1) { newArr[idx].quantity -= 1; } else { newArr.splice(idx, 1); }
+                                                                    setManualLocations(newArr);
+                                                                }
+                                                            }} className="w-8 h-8 flex items-center justify-center rounded-md bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-300 disabled:opacity-40 transition-colors shadow-sm cursor-pointer">
+                                                                <span className="text-lg font-bold leading-none select-none">-</span>
+                                                            </button>
+                                                            <span className="font-bold text-gray-900 w-8 text-center select-none">{currentQty}</span>
+                                                            <button type="button" disabled={!canAdd} onClick={() => {
+                                                                const newArr = [...manualLocations];
+                                                                const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
+                                                                if (idx >= 0) { newArr[idx].quantity += 1; } else { newArr.push({ location: loc, quantity: 1, channel: ch }); }
+                                                                setManualLocations(newArr);
+                                                            }} className="w-8 h-8 flex items-center justify-center rounded-md bg-coca-red text-white hover:bg-coca-black disabled:opacity-40 transition-colors shadow-sm cursor-pointer">
+                                                                <span className="text-lg font-bold leading-none select-none">+</span>
+                                                            </button>
+                                                            <button type="button" disabled={!canAdd} onClick={() => {
+                                                                const currentTotal = manualLocations.reduce((s, i) => s + i.quantity, 0);
+                                                                const currentInLoc = manualLocations.find(m => m.location === loc && m.channel === ch)?.quantity || 0;
+                                                                const needed = Number(requestQty) - currentTotal;
+                                                                const availableInLoc = maxAvailable - currentInLoc;
+                                                                const toAdd = Math.min(needed, availableInLoc);
+                                                                if (toAdd > 0) {
+                                                                    const newArr = [...manualLocations];
+                                                                    const idx = newArr.findIndex(m => m.location === loc && m.channel === ch);
+                                                                    if (idx >= 0) { newArr[idx].quantity += toAdd; } else { newArr.push({ location: loc, quantity: toAdd, channel: ch }); }
+                                                                    setManualLocations(newArr);
+                                                                }
+                                                            }} className="ml-2 px-2 h-8 flex items-center justify-center rounded-md bg-red-100 text-red-700 font-black text-[10px] uppercase tracking-tighter hover:bg-red-200 disabled:opacity-40 transition-all border border-red-200">
+                                                                MAX
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                        {manualLocations.reduce((a, c) => a + c.quantity, 0) !== Number(requestQty) && (
+                                            <p className="text-xs text-red-600 font-semibold mt-2 text-center">
+                                                ⚠ Debes seleccionar exactamente {Number(requestQty)} unidades en total
+                                            </p>
+                                        )}
+                                    </div>
+                                )}
+
                                 <div>
                                     <label className="block text-sm font-semibold text-gray-700 mb-1">Nombre y Apellido de quien solicita</label>
                                     <div className="flex bg-gray-50 rounded-xl border border-gray-200 overflow-hidden focus-within:ring-2 focus-within:ring-coca-red focus-within:border-transparent transition-all">
@@ -1184,26 +1760,33 @@ export default function ProductDetails() {
 
                                 {isManualMode ? (
                                     <div className="flex flex-col gap-3">
-                                        <button
-                                            type="button"
-                                            onClick={(e) => handleCreateRequest(e, 'ENTREGADA')}
-                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
-                                            className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
-                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed' : 'bg-coca-black hover:bg-black hover:shadow-lg'}`}
-                                        >
-                                            {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <X size={20} />}
-                                            {isRequesting ? 'Procesando...' : 'Salida Directa (Descontar ya)'}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            onClick={(e) => handleCreateRequest(e, 'APROBADA')}
-                                            disabled={isRequesting || requestQty > totalStock || !requestName.trim()}
-                                            className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
-                                                ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 hover:shadow-lg'}`}
-                                        >
-                                            {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
-                                            {isRequesting ? 'Procesando...' : 'Reservar (Dejar Por Retirar)'}
-                                        </button>
+                                        {(() => {
+                                            const locationAllocated = availableLocationsForSalida.length === 0 || manualLocations.reduce((a, c) => a + c.quantity, 0) === Number(requestQty);
+                                            return (
+                                                <>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleCreateRequest(e, 'ENTREGADA')}
+                                                        disabled={isRequesting || Number(requestQty) > totalStock || !requestName.trim() || !locationAllocated}
+                                                        className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                                            ${isRequesting || Number(requestQty) > totalStock || !requestName.trim() || !locationAllocated ? 'bg-gray-400 cursor-not-allowed' : 'bg-coca-black hover:bg-black hover:shadow-lg'}`}
+                                                    >
+                                                        {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <X size={20} />}
+                                                        {isRequesting ? 'Procesando...' : 'Salida Directa (Descontar ya)'}
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={(e) => handleCreateRequest(e, 'APROBADA')}
+                                                        disabled={isRequesting || Number(requestQty) > totalStock || !requestName.trim() || !locationAllocated}
+                                                        className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                                            ${isRequesting || Number(requestQty) > totalStock || !requestName.trim() || !locationAllocated ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 hover:shadow-lg'}`}
+                                                    >
+                                                        {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
+                                                        {isRequesting ? 'Procesando...' : 'Reservar (Dejar Por Retirar)'}
+                                                    </button>
+                                                </>
+                                            );
+                                        })()}
                                         <div className="relative flex py-2 items-center">
                                             <div className="flex-grow border-t border-gray-200"></div>
                                             <span className="flex-shrink-0 mx-4 text-gray-400 font-medium text-xs uppercase tracking-widest">Otras Opciones</span>
@@ -1215,17 +1798,17 @@ export default function ProductDetails() {
                                                 setBajaReason(receptorName); // Pre-cargar si escribió algo en el campo receptor
                                                 setIsBajaPromptOpen(true);
                                             }}
-                                            disabled={isRequesting || requestQty > totalStock}
+                                            disabled={isRequesting || Number(requestQty) > totalStock}
                                             className={`w-full py-3.5 rounded-xl font-bold text-amber-900 flex justify-center items-center gap-2 transition-all shadow-sm border border-amber-200
-                                                ${isRequesting || requestQty > totalStock ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200'}`}
+                                                ${isRequesting || Number(requestQty) > totalStock ? 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed' : 'bg-amber-100 hover:bg-amber-200'}`}
                                         >
                                             {isRequesting ? <Loader2 size={18} className="animate-spin" /> : <AlertTriangle size={18} />}
                                             {isRequesting ? 'Procesando...' : 'Dar de Baja (Dañado/Merma)'}
                                         </button>
                                     </div>
                                 ) : (
-                                    <button type="submit" disabled={isRequesting || requestQty > totalStock || !requestName.trim()} className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
-                                        ${isRequesting || requestQty > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed text-gray-100' : 'bg-coca-red hover:bg-red-700 hover:shadow-lg'}`}>
+                                    <button type="submit" disabled={isRequesting || Number(requestQty) > totalStock || !requestName.trim()} className={`w-full py-4 rounded-xl font-bold text-white flex justify-center items-center gap-2 transition-all shadow-md
+                                        ${isRequesting || Number(requestQty) > totalStock || !requestName.trim() ? 'bg-gray-400 cursor-not-allowed text-gray-100' : 'bg-coca-red hover:bg-red-700 hover:shadow-lg'}`}>
                                         {isRequesting ? <Loader2 size={20} className="animate-spin" /> : <Send size={20} />}
                                         {isRequesting ? 'Enviando a Bodega...' : 'Confirmar Petición Directa'}
                                     </button>
@@ -1233,7 +1816,8 @@ export default function ProductDetails() {
                             </form>
                         )}
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
             <div className="md:hidden mt-8 text-center pt-8 border-t">
                 <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-coca-black inline-flex items-center gap-2 font-medium">
@@ -1241,8 +1825,8 @@ export default function ProductDetails() {
                 </button>
             </div>
             {/* Modal para Motivo de Baja Rápida */}
-            {isBajaPromptOpen && (
-                <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+            {isBajaPromptOpen && createPortal(
+                <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
                     <div className="bg-white rounded-3xl shadow-xl w-full max-w-sm overflow-hidden animate-in fade-in zoom-in-95">
                         <div className="p-5 flex items-start gap-4 border-b bg-amber-50/50 border-amber-100">
                             <div className="p-2 rounded-full bg-amber-100 text-amber-600">
@@ -1253,7 +1837,7 @@ export default function ProductDetails() {
                                     Motivo de Baja
                                 </h3>
                                 <p className="text-sm text-gray-500 mt-1">
-                                    Estás a punto de descontar <strong>{requestQty} UN</strong> del inventario.
+                                    Estás a punto de descontar <strong>{Number(requestQty)} UN</strong> del inventario.
                                 </p>
                             </div>
                             <button onClick={() => setIsBajaPromptOpen(false)} className="text-gray-400 hover:text-gray-600 outline-none">
@@ -1296,7 +1880,8 @@ export default function ProductDetails() {
                             </div>
                         </div>
                     </div>
-                </div>
+                </div>,
+                document.body
             )}
         </div>
     );
